@@ -6815,7 +6815,7 @@ function addP3aStorageShelf() {
   });
   const hangarCenterDeskChairCenter = [hangarCenterDeskCenter[0] - 0.9, hangarCenterDeskCenter[1]];
   addRollingChair(hangarCenterDeskChairCenter, Math.PI / 2, { registerAsSeat: false });
-  addSeatedCharacter({
+  const nik = addSeatedCharacter({
     planPosition: hangarCenterDeskChairCenter,
     rotation: Math.atan2(
       hangarCenterDeskCenter[0] - hangarCenterDeskChairCenter[0],
@@ -6827,6 +6827,13 @@ function addP3aStorageShelf() {
     suitColor: "#434d56",
     shirtColor: "#f3efe6",
   });
+  if (nik) {
+    registerChatNpc(nik, {
+      promptEyebrow: "Nik",
+      promptTitle: "Press E to talk",
+      lines: ["Hey.", "What's up?", "Just working."],
+    });
+  }
   const mirroredSingleDeskCenter = [PLAN_WIDTH - hangarCenterDeskCenter[0], hangarCenterDeskCenter[1] + 0.2];
   addSingleLayerDesk(mirroredSingleDeskCenter, Math.PI / 2, 2.6);
   addDeskPaperAndMarkers(mirroredSingleDeskCenter, Math.PI / 2, {
@@ -6847,18 +6854,25 @@ function addP3aStorageShelf() {
   });
   const mirroredSingleDeskChairCenter = [mirroredSingleDeskCenter[0] + 0.95, mirroredSingleDeskCenter[1]];
   addRollingChair(mirroredSingleDeskChairCenter, -Math.PI / 2, { registerAsSeat: false });
-  addSeatedCharacter({
+  const max = addSeatedCharacter({
     planPosition: mirroredSingleDeskChairCenter,
     rotation: Math.atan2(
       mirroredSingleDeskCenter[0] - mirroredSingleDeskChairCenter[0],
       mirroredSingleDeskCenter[1] - mirroredSingleDeskChairCenter[1],
-    ),
+    ) + Math.PI,
     seatHeight: 0.48,
     hairColor: "#30231d",
     tieColor: "#9f6745",
     suitColor: "#434d56",
     shirtColor: "#f3efe6",
   });
+  if (max) {
+    registerChatNpc(max, {
+      promptEyebrow: "Max",
+      promptTitle: "Press E to talk",
+      lines: ["Hey.", "What's up?", "Working on some stuff."],
+    });
+  }
   addRollingChair([huggingSingleDeskCenter[0] + 0.95, huggingSingleDeskCenter[1]], -Math.PI / 2);
   const southHangarDeskCenter = [5.19, 20.2];
   addDoubleLayerDesk(southHangarDeskCenter, Math.PI * 1.5, 2.2);
@@ -6880,7 +6894,7 @@ function addP3aStorageShelf() {
   );
   const southHangarDeskChairCenter = [southHangarDeskCenter[0] - 0.9, southHangarDeskCenter[1]];
   addRollingChair(southHangarDeskChairCenter, Math.PI / 2, { registerAsSeat: false });
-  addSeatedCharacter({
+  const brandon = addSeatedCharacter({
     planPosition: southHangarDeskChairCenter,
     rotation: Math.atan2(
       southHangarDeskCenter[0] - southHangarDeskChairCenter[0],
@@ -6892,6 +6906,13 @@ function addP3aStorageShelf() {
     suitColor: "#434d56",
     shirtColor: "#f3efe6",
   });
+  if (brandon) {
+    registerChatNpc(brandon, {
+      promptEyebrow: "Brandon",
+      promptTitle: "Press E to talk",
+      lines: ["Hey.", "What's up?", "Busy with the desk."],
+    });
+  }
   const hangarStageCenter = [6.5, 30.0];
   const slimHangarShelfWidth = 2.4;
   const slimHangarShelfDepth = 0.34;
@@ -7220,9 +7241,9 @@ function addP3aStorageShelf() {
     behindHangarSlidingCameraTripodCenter,
     behindHangarSlidingCameraTripodRotation,
     0.96,
-    false,
+    true,
     {
-      proRig: true,
+      proRig: false,
       headYOffset: -0.22,
     },
   );
@@ -8584,9 +8605,9 @@ function addP1P10CornerShelves() {
     tableEndZ - 0.55,
   ];
   chairZs.forEach((z, index) => {
-    addRollingChair([tableCenter[0] - chairOffsetX, z], Math.PI / 2);
+    addRollingChair([tableCenter[0] - chairOffsetX, z], Math.PI / 2, { standOffset: 0.6 });
     if (index !== 0) {
-      addRollingChair([tableCenter[0] + chairOffsetX, z], -Math.PI / 2);
+      addRollingChair([tableCenter[0] + chairOffsetX, z], -Math.PI / 2, { standOffset: 0.6 });
     }
   });
 }
@@ -9294,7 +9315,7 @@ function addFootballGoalpost(center, rotation = 0) {
   pushPlanRectCollider(center, 0.78 * scale, 0.78 * scale, rotation, PLAYER_RADIUS * 0.04);
 }
 
-function addRollingChair(center, rotation = 0, { registerAsSeat = true } = {}) {
+function addRollingChair(center, rotation = 0, { registerAsSeat = true, standOffset = 0.8 } = {}) {
   const chair = new THREE.Group();
   const seatMaterial = new THREE.MeshStandardMaterial({
     color: "#202124",
@@ -9362,7 +9383,7 @@ function addRollingChair(center, rotation = 0, { registerAsSeat = true } = {}) {
   enableShadows(chair);
   placePlanObject(chair, center, 0, rotation, furnishingGroup);
   if (registerAsSeat) {
-    registerSeat(center, rotation, 1.16, 0.8, 0.52);
+    registerSeat(center, rotation, 1.16, standOffset, 0.52);
   }
   pushPlanRectCollider(center, 0.68, 0.68, 0, PLAYER_RADIUS * 0.08);
 }
