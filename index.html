@@ -168,6 +168,82 @@
       </div>
     </div>
 
+    <div id="jordiHero" class="forecast-frenzy jordi-hero forecast-frenzy--hidden" aria-hidden="true">
+      <div class="forecast-frenzy__intro-overlay"></div>
+      <div class="forecast-frenzy__fade"></div>
+      <div class="forecast-frenzy__flash"></div>
+
+      <div class="jordi-hero__cabinet">
+        <div class="jordi-hero__marquee">
+          <div class="jordi-hero__title-group">
+            <div class="jordi-hero__kicker">Jordi Arcade Cabinet</div>
+            <strong class="jordi-hero__title">Soundboard Hero</strong>
+          </div>
+          <div id="jordiHeroIntroLine" class="jordi-hero__introline">
+            Four lanes. Four MP3s. Hit the line clean.
+          </div>
+        </div>
+
+        <div class="jordi-hero__layout">
+          <aside class="jordi-hero__sidebar">
+            <div class="jordi-hero__panel">
+              <div class="jordi-hero__panel-label">Current Set</div>
+              <div id="jordiHeroPanelLabel" class="jordi-hero__panel-value">Jordi Soundboard Hero</div>
+            </div>
+            <div class="jordi-hero__stats">
+              <div class="jordi-hero__stat">
+                <span class="jordi-hero__stat-label">Score</span>
+                <strong id="jordiHeroScore" class="jordi-hero__stat-value">0</strong>
+              </div>
+              <div class="jordi-hero__stat">
+                <span class="jordi-hero__stat-label">Combo</span>
+                <strong id="jordiHeroCombo" class="jordi-hero__stat-value">0x</strong>
+              </div>
+              <div class="jordi-hero__stat">
+                <span class="jordi-hero__stat-label">Accuracy</span>
+                <strong id="jordiHeroAccuracy" class="jordi-hero__stat-value">100%</strong>
+              </div>
+              <div class="jordi-hero__stat">
+                <span class="jordi-hero__stat-label">Time Left</span>
+                <strong id="jordiHeroTimer" class="jordi-hero__stat-value">00:00</strong>
+              </div>
+            </div>
+            <div class="jordi-hero__instructions">
+              Guitar Hero rules, soundboard payload. Each lane is one MP3 from the local <code>Soundboard</code>
+              folder. Hit notes on the strike line with <code>1-4</code> or <code>A/S/D/F</code>.
+            </div>
+            <div id="jordiHeroPlaylist" class="jordi-hero__playlist"></div>
+          </aside>
+
+          <section class="jordi-hero__stage">
+            <div class="jordi-hero__ambient"></div>
+            <div id="jordiHeroFeedback" class="jordi-hero__feedback" data-visible="false"></div>
+            <div id="jordiHeroCountdown" class="jordi-hero__countdown" data-visible="false"></div>
+            <div id="jordiHeroHighway" class="jordi-hero__highway" aria-label="Jordi soundboard rhythm highway"></div>
+          </section>
+        </div>
+
+        <div id="jordiHeroFooter" class="jordi-hero__footer">
+          Watch the strike line. Each lane triggers one MP3 from Soundboard.
+        </div>
+
+        <div id="jordiHeroResult" class="forecast-frenzy__result" hidden>
+          <div class="forecast-frenzy__result-card jordi-hero__result-card">
+            <div class="forecast-frenzy__result-kicker">Set Complete</div>
+            <h2 id="jordiHeroResultRank" class="forecast-frenzy__result-rank">Clip Warmup Act</h2>
+            <div id="jordiHeroResultSummary" class="forecast-frenzy__result-summary">
+              0/0 notes hit • 0% accuracy • best combo 0
+            </div>
+            <div id="jordiHeroResultStats" class="forecast-frenzy__result-stats"></div>
+            <div class="forecast-frenzy__result-buttons">
+              <button id="jordiHeroReplayButton" type="button">Replay</button>
+              <button id="jordiHeroExitButton" type="button">Exit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="./main.js"></script>
   </body>
 </html>

@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { Reflector } from "three/addons/objects/Reflector.js";
 import { ForecastFrenzyGame } from "./forecast-frenzy.js";
+import { JordiSoundboardHeroOverlay } from "./jordi-soundboard-hero.js";
 import { TylerBoardOverlay } from "./tyler-board.js";
 
 const FLOOR_THICKNESS = 0.08;
@@ -447,6 +448,7 @@ const interactionPromptTitle = document.querySelector("#interactionPromptTitle")
 const interactionPromptLine = document.querySelector("#interactionPromptLine");
 const forecastFrenzyRoot = document.querySelector("#forecastFrenzy");
 const tylerBoardRoot = document.querySelector("#tylerBoard");
+const jordiHeroRoot = document.querySelector("#jordiHero");
 const coordX = document.querySelector("#coordX");
 const coordY = document.querySelector("#coordY");
 const coordZ = document.querySelector("#coordZ");
@@ -532,6 +534,39 @@ const state = {
 };
 
 const clock = new THREE.Clock();
+const footstepState = { distance: 0, stride: 0.55 };
+let footstepAudioContext = null;
+
+function playFootstep() {
+  if (!footstepAudioContext) {
+    footstepAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (footstepAudioContext.state === "suspended") {
+    footstepAudioContext.resume();
+  }
+  const ctx = footstepAudioContext;
+  const bufferSize = ctx.sampleRate * 0.06;
+  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < bufferSize; i += 1) {
+    data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.15));
+  }
+  const source = ctx.createBufferSource();
+  source.buffer = buffer;
+  const filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = 400;
+  filter.Q.value = 0.5;
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.24, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(ctx.destination);
+  source.start(ctx.currentTime);
+  source.stop(ctx.currentTime + 0.06);
+}
+
 const collisionRects = [];
 const furnitureRects = [];
 const interactiveDoors = [];
@@ -549,6 +584,10 @@ const forecastFrenzy = new ForecastFrenzyGame({
 const tylerBoard = new TylerBoardOverlay({
   root: tylerBoardRoot,
   onExit: handleTylerBoardExit,
+});
+const jordiHero = new JordiSoundboardHeroOverlay({
+  root: jordiHeroRoot,
+  onExit: handleJordiHeroExit,
 });
 
 const architectureGroup = new THREE.Group();
@@ -1780,6 +1819,39 @@ function registerTylerBoardNpc(character, {
 
   interactiveNpcs.push({
     type: "tylerBoard",
+    promptEyebrow,
+    promptTitle,
+    lines,
+    promptRadius,
+    avatar: character,
+    interactionPoint: character.interactionPoint,
+    promptAnchor: character.head,
+    promptOffsetY: 0.42,
+    baseRootY: character.root.position.y,
+    baseHeadRotationX: character.head.rotation.x,
+    baseHeadRotationY: character.head.rotation.y,
+    baseLeftArmX: character.leftArmPivot.rotation.x,
+    baseRightArmX: character.rightArmPivot.rotation.x,
+    phaseOffset: Math.random() * Math.PI * 2,
+  });
+}
+
+function registerJordiHeroNpc(character, {
+  promptEyebrow = "Jordi",
+  promptTitle = "Press E to jam",
+  lines = [
+    "Four lanes. Every lane fires a soundboard MP3.",
+    "Hit the strike line clean or the combo dies.",
+    "It is Guitar Hero, but the guitar is fully broken.",
+  ],
+  promptRadius = 1.8,
+} = {}) {
+  if (!character) {
+    return;
+  }
+
+  interactiveNpcs.push({
+    type: "jordiHero",
     promptEyebrow,
     promptTitle,
     lines,
@@ -7515,8 +7587,28 @@ function addP3aStorageShelf() {
     const isOccupied = circleTableChairSeats.some(
       ([x, z]) => Math.abs(chairCenter[0] - x) < 0.01 && Math.abs(chairCenter[1] - z) < 0.01,
     );
+    const isEmptyCircleTableChair =
+      !isOccupied &&
+      Math.abs(chairCenter[0] - 6.5) < 0.01 &&
+      Math.abs(chairCenter[1] - 32.7) < 0.01;
+    let breakingNewsAudio = null;
     addOversizedSwivelChair(chairCenter, chairRotation, {
       registerAsSeat: !isOccupied,
+      onSit: isEmptyCircleTableChair
+        ? () => {
+            breakingNewsAudio = new Audio(new URL("./BreakingNews_NEW.mp3", import.meta.url).href);
+            breakingNewsAudio.play().catch(() => {});
+          }
+        : undefined,
+      onStand: isEmptyCircleTableChair
+        ? () => {
+            if (breakingNewsAudio) {
+              breakingNewsAudio.pause();
+              breakingNewsAudio.currentTime = 0;
+              breakingNewsAudio = null;
+            }
+          }
+        : undefined,
     });
     if (isOccupied) {
       const towardTable = 0.08;
@@ -7541,10 +7633,17 @@ function addP3aStorageShelf() {
       });
       const isHostRight = chairCenter[0] > hangarStageCenter[0];
       if (seated) {
-        registerChatNpc(seated, {
-          promptEyebrow: isHostRight ? "Jordi" : "John",
-          promptTitle: "Press E to talk",
-        });
+        if (isHostRight) {
+          registerJordiHeroNpc(seated, {
+            promptEyebrow: "Jordi",
+            promptTitle: "Press E to jam",
+          });
+        } else {
+          registerChatNpc(seated, {
+            promptEyebrow: "John",
+            promptTitle: "Press E to talk",
+          });
+        }
       }
     }
     addStudioTableMicrophone(hangarStageCenter, chairCenter, 4.2 / 2, 0.96);
@@ -9507,7 +9606,7 @@ function addRollingChair(center, rotation = 0, { registerAsSeat = true, standOff
   pushPlanRectCollider(center, 0.68, 0.68, 0, PLAYER_RADIUS * 0.08);
 }
 
-function addOversizedSwivelChair(center, rotation = 0, { registerAsSeat = true } = {}) {
+function addOversizedSwivelChair(center, rotation = 0, { registerAsSeat = true, onSit, onStand } = {}) {
   const chair = new THREE.Group();
   const upholsteryMaterial = new THREE.MeshStandardMaterial({
     color: "#191b1e",
@@ -9628,7 +9727,7 @@ function addOversizedSwivelChair(center, rotation = 0, { registerAsSeat = true }
   enableShadows(chair);
   placePlanObject(chair, center, 0.04, rotation, furnishingGroup);
   if (registerAsSeat) {
-    registerSeat(center, rotation, 1.4, 0.8, 0.7);
+    registerSeat(center, rotation, 1.4, 0.8, 0.7, { onSit, onStand });
   }
   pushPlanRectCollider(center, 1.28, 1.28, 0, PLAYER_RADIUS * 0.06);
 }
@@ -9722,6 +9821,7 @@ function registerSeat(
   eyeHeight = 1.12,
   standOffset = 0.82,
   surfaceHeight = Math.max(0.34, eyeHeight - 0.6),
+  options = {},
 ) {
   const interactionWorld = toWorldPoint(center);
   interactiveSeats.push({
@@ -9732,6 +9832,7 @@ function registerSeat(
     surfaceHeight,
     interactionPoint: new THREE.Vector3(interactionWorld.x, eyeHeight, interactionWorld.z),
     promptOffsetY: 0.28,
+    ...options,
   });
 }
 
@@ -10806,21 +10907,6 @@ function addHangarRingGong(center, rotation = 0) {
     new THREE.Vector3(legX, lowerCrossbarY, 0),
     0.012,
   );
-
-  const hookX = innerDiscRadius * 0.78;
-  const hookBottomY = gongTopY - 0.04;
-  [-hookX, hookX].forEach((x) => {
-    const hook = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.006, 0.006, hangerBarY - hookBottomY, 8),
-      new THREE.MeshStandardMaterial({
-        color: "#242629",
-        roughness: 0.8,
-        metalness: 0.1,
-      }),
-    );
-    hook.position.set(x, hookBottomY + (hangerBarY - hookBottomY) / 2, -0.015);
-    gong.add(hook);
-  });
 
   const outerDisc = new THREE.Mesh(
     new THREE.CylinderGeometry(outerDiscRadius, outerDiscRadius, 0.08, 48),
@@ -12639,6 +12725,25 @@ function handleTylerBoardExit() {
   syncUi();
 }
 
+function startJordiHero(npc) {
+  clearMovementState();
+  state.seatedSeat = null;
+  playerState.motion = 0;
+  state.mode = "minigame";
+  unlockPointer();
+  hideInteractionPrompt();
+  const line =
+    npc.lines[Math.floor(Math.random() * npc.lines.length)] ??
+    "Four lanes. Every lane fires a soundboard MP3.";
+  jordiHero.start({ introLine: line });
+  syncUi();
+}
+
+function handleJordiHeroExit() {
+  state.mode = "walk";
+  syncUi();
+}
+
 function sitInSeat(seat) {
   state.seatedSeat = seat;
   clearMovementState();
@@ -12652,6 +12757,9 @@ function sitInSeat(seat) {
   );
   setLookAnglesFromTarget(playerState, playerState.position, lookTarget);
   playerState.facingYaw = playerState.yaw;
+  if (seat.onSit) {
+    seat.onSit();
+  }
   playerState.motion = 0;
 }
 
@@ -12700,6 +12808,9 @@ function standUpFromSeat() {
     return;
   }
   const seat = state.seatedSeat;
+  if (seat.onStand) {
+    seat.onStand();
+  }
   const fwdX = Math.sin(seat.rotation);
   const fwdZ = Math.cos(seat.rotation);
   const rightX = Math.cos(seat.rotation);
@@ -12751,6 +12862,10 @@ function toggleNearestInteraction() {
     }
     if (npc.type === "tylerBoard") {
       startTylerBoard(npc);
+      return;
+    }
+    if (npc.type === "jordiHero") {
+      startJordiHero(npc);
     }
     return;
   }
@@ -14040,6 +14155,7 @@ function animate() {
   updateCoordinateDisplay();
   forecastFrenzy.update(delta, elapsedTime);
   tylerBoard.update(delta, elapsedTime);
+  jordiHero.update(delta, elapsedTime);
   mirrorDistanceLods.forEach(({ reflective, fallback, threshold }) => {
     const worldPosition = new THREE.Vector3();
     reflective.getWorldPosition(worldPosition);
@@ -14077,7 +14193,29 @@ function updateWalkthrough(delta) {
       .addScaledVector(forward, moveIntent.y * speed * delta)
       .addScaledVector(right, moveIntent.x * speed * delta);
 
+    const prevX = playerState.position.x;
+    const prevZ = playerState.position.z;
     attemptMove(movement.x, movement.z);
+    if (
+      playerState.position.y <= PLAYER_HEIGHT + 0.02 &&
+      (playerState.position.x !== prevX || playerState.position.z !== prevZ)
+    ) {
+      const moved = Math.hypot(
+        playerState.position.x - prevX,
+        playerState.position.z - prevZ,
+      );
+      footstepState.distance += moved;
+      const stride = state.sprint ? footstepState.stride * 0.85 : footstepState.stride;
+      while (footstepState.distance >= stride) {
+        footstepState.distance -= stride;
+        playFootstep();
+      }
+    }
+  } else {
+    footstepState.distance = 0;
+  }
+  if (playerState.position.y > PLAYER_HEIGHT + 0.02) {
+    footstepState.distance = 0;
   }
   playerState.facingYaw += angleDifference(
     playerState.facingYaw,
@@ -14273,7 +14411,10 @@ function onKeyDown(event) {
     if (forecastFrenzy.handleKeyDown(event)) {
       return;
     }
-    tylerBoard.handleKeyDown(event);
+    if (tylerBoard.handleKeyDown(event)) {
+      return;
+    }
+    jordiHero.handleKeyDown(event);
     return;
   }
 
