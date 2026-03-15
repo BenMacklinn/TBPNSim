@@ -527,6 +527,8 @@ const furnitureRects = [];
 const interactiveDoors = [];
 const interactiveSeats = [];
 const interactiveNpcs = [];
+const interactiveGongs = [];
+const gongHitAnimations = [];
 const mirrorDistanceLods = [];
 const slidingShelfCameras = [];
 const npcPromptWorldPosition = new THREE.Vector3();
@@ -1752,6 +1754,18 @@ function registerChatNpc(character, {
   });
 }
 
+function registerGong(center, discParts, promptRadius = 1.8) {
+  const interactionWorld = toWorldPoint(center);
+  interactiveGongs.push({
+    type: "gong",
+    center,
+    discParts,
+    promptRadius,
+    interactionPoint: new THREE.Vector3(interactionWorld.x, 1.2, interactionWorld.z),
+    promptOffsetY: 0.2,
+  });
+}
+
 function registerForecastNpc(character, {
   promptEyebrow = "Weather Desk",
   promptTitle = "Press E to Forecast",
@@ -2972,6 +2986,7 @@ function addP3FlagAndGong() {
   enableShadows(gong);
   placePlanObject(gong, [centerX, PLAN_DEPTH - 0.34], 0, Math.PI, furnishingGroup);
   pushPlanRectCollider([centerX, PLAN_DEPTH - 0.34], 2.0, 0.32, 0, PLAYER_RADIUS * 0.04);
+  registerGong([centerX, PLAN_DEPTH - 0.34], [gongDisc, gongCenter], 1.8);
 
   const board = new THREE.Mesh(
     new THREE.BoxGeometry(2.35, 1.35, 0.04),
@@ -5894,9 +5909,9 @@ function addP3aStorageShelf() {
       setup.add(monitor);
     };
 
-    addMonitor([0.78, 0.46], [0.08, 2.04, -0.42], deskMonitorTexture, 0, 1.08);
-    addMonitor([0.78, 0.46], [-0.42, 1.52, -0.26], deskMonitorTexture, 0.14, 0.62);
-    addMonitor([0.78, 0.46], [0.42, 1.52, -0.26], deskMonitorTexture, -0.14, 0.62);
+    addMonitor([0.78, 0.46], [0.08, 2.04, -0.42], deskMonitorTexture, 0, 0.79);
+    addMonitor([0.78, 0.46], [-0.42, 1.52, -0.26], deskMonitorTexture, 0.14, 0.27);
+    addMonitor([0.78, 0.46], [0.42, 1.52, -0.26], deskMonitorTexture, -0.14, 0.27);
 
     const switcher = new THREE.Group();
     const consoleBody = new THREE.Mesh(
@@ -6106,11 +6121,11 @@ function addP3aStorageShelf() {
       setup.add(monitor);
     };
 
-    addMonitor({ x: -1.22, y: 2.18, z: 0.24, angle: -THREE.MathUtils.degToRad(20), size: [0.94, 0.55], stemHeight: 1.06, standBehind: true });
-    addMonitor({ x: -1.08, z: 0.28, angle: -THREE.MathUtils.degToRad(20) });
-    addMonitor({ x: 0, z: 0.36 });
-    addMonitor({ x: 1.08, z: 0.28, angle: THREE.MathUtils.degToRad(20) });
-    addMonitor({ x: 1.22, y: 2.18, z: 0.24, angle: THREE.MathUtils.degToRad(20), size: [0.94, 0.55], stemHeight: 1.06, standBehind: true });
+    addMonitor({ x: -1.22, y: 2.18, z: 0.24, angle: -THREE.MathUtils.degToRad(20), size: [0.94, 0.55], stemHeight: 0.885, standBehind: true });
+    addMonitor({ x: -1.08, z: 0.28, angle: -THREE.MathUtils.degToRad(20), stemHeight: 0.21 });
+    addMonitor({ x: 0, z: 0.36, stemHeight: 0.21 });
+    addMonitor({ x: 1.08, z: 0.28, angle: THREE.MathUtils.degToRad(20), stemHeight: 0.21 });
+    addMonitor({ x: 1.22, y: 2.18, z: 0.24, angle: THREE.MathUtils.degToRad(20), size: [0.94, 0.55], stemHeight: 0.885, standBehind: true });
 
     enableShadows(setup);
     placePlanObject(setup, center, 0, rotation, furnishingGroup);
@@ -10507,6 +10522,24 @@ function addMiniGong({ center, y, scale = 1, rotation = 0 }) {
   disc.position.set(0, 0.16 * scale, 0);
   gong.add(disc);
 
+  const stringMaterial = new THREE.MeshStandardMaterial({
+    color: "#5c4a3a",
+    roughness: 0.9,
+    metalness: 0.02,
+  });
+  const stringLength = barBottomY - discTopY;
+  const stringRadius = 0.002 * scale;
+  const discTopY = 0.16 * scale + 0.075 * scale;
+  const barBottomY = 0.27 * scale - 0.0125 * scale;
+  [-0.055, 0.055].forEach((z) => {
+    const string = new THREE.Mesh(
+      new THREE.CylinderGeometry(stringRadius, stringRadius, stringLength, 6),
+      stringMaterial,
+    );
+    string.position.set(0, (discTopY + barBottomY) / 2, z * scale);
+    gong.add(string);
+  });
+
   enableShadows(gong);
   placePlanObject(gong, center, y, rotation, furnishingGroup);
 }
@@ -10703,6 +10736,7 @@ function addHangarRingGong(center, rotation = 0) {
   gong.scale.setScalar(1.25);
   placePlanObject(gong, center, 0, rotation, furnishingGroup);
   pushPlanRectCollider(center, 2.95, 0.88, rotation, PLAYER_RADIUS * 0.04);
+  registerGong(center, [outerDisc, innerDisc, centerCap], 1.8);
 }
 
 function addHangarRearShelf(center, rotation = 0) {
@@ -12340,6 +12374,7 @@ function hideInteractionPrompt() {
 }
 
 function getInteractionDistanceLimit(type, target) {
+  if (type === "gong") return target.promptRadius;
   return type === "npc" ? target.promptRadius : target.promptRadius ?? 1.8;
 }
 
@@ -12359,6 +12394,11 @@ function getNearestInteraction() {
       type: "npc",
       target: npc,
       distance: npc.interactionPoint.distanceTo(playerState.position),
+    })),
+    ...interactiveGongs.map((gong) => ({
+      type: "gong",
+      target: gong,
+      distance: gong.interactionPoint.distanceTo(playerState.position),
     })),
   ]
     .filter(({ distance, target, type }) => distance <= getInteractionDistanceLimit(type, target))
@@ -12433,6 +12473,10 @@ function updateInteractionPrompt(elapsedTime) {
     interactionPromptEyebrow.textContent = "Seat";
     interactionPromptTitle.textContent = "Press E to Sit";
     interactionPromptLine.textContent = "Take a seat.";
+  } else if (nearestInteraction.type === "gong") {
+    interactionPromptEyebrow.textContent = "Gong";
+    interactionPromptTitle.textContent = "Press E to strike";
+    interactionPromptLine.textContent = "Ring the gong.";
   } else {
     interactionPromptEyebrow.textContent = nearestInteraction.target.promptEyebrow;
     interactionPromptTitle.textContent = nearestInteraction.target.promptTitle;
@@ -12479,6 +12523,41 @@ function sitInSeat(seat) {
   playerState.motion = 0;
 }
 
+let gongAudio = null;
+
+function strikeGong(gong) {
+  if (!gongAudio) {
+    gongAudio = new Audio(new URL("./Gong Sound Effect 4.mp3", import.meta.url).href);
+  }
+  gongAudio.currentTime = 0;
+  gongAudio.play().catch(() => {});
+  gongHitAnimations.push({
+    discParts: gong.discParts,
+    startTime: performance.now(),
+    duration: 0.6,
+  });
+}
+
+function updateGongAnimations() {
+  const now = performance.now();
+  for (let i = gongHitAnimations.length - 1; i >= 0; i -= 1) {
+    const anim = gongHitAnimations[i];
+    const t = (now - anim.startTime) / 1000 / anim.duration;
+    if (t >= 1) {
+      anim.discParts.forEach((part) => {
+        part.rotation.z = 0;
+      });
+      gongHitAnimations.splice(i, 1);
+      continue;
+    }
+    const damped = Math.exp(-t * 5) * Math.cos(t * Math.PI * 4);
+    const tilt = damped * 0.28;
+    anim.discParts.forEach((part) => {
+      part.rotation.z = tilt;
+    });
+  }
+}
+
 function standUpFromSeat() {
   if (!state.seatedSeat) {
     return;
@@ -12519,6 +12598,11 @@ function toggleNearestInteraction() {
 
   if (nearestInteraction.type === "seat") {
     sitInSeat(nearestInteraction.target);
+    return;
+  }
+
+  if (nearestInteraction.type === "gong") {
+    strikeGong(nearestInteraction.target);
     return;
   }
 
@@ -13789,6 +13873,7 @@ function animate() {
   const elapsedTime = clock.elapsedTime;
   updateInteractiveDoors(delta);
   updateInteractiveNpcs(elapsedTime);
+  updateGongAnimations();
 
   if (state.mode === "walk") {
     updateWalkthrough(delta, elapsedTime);
