@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ultradome Simulator</title>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.174.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.174.0/examples/jsm/"
+        }
+      }
+    </script>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+
+    <div id="coordinateDisplay" class="coordinate-display" aria-hidden="true">
+      <span id="coordX">x: 0</span>
+      <span id="coordY">y: 0</span>
+      <span id="coordZ">z: 0</span>
+    </div>
+
+    <div id="interactionPrompt" class="npc-prompt npc-prompt--hidden" aria-hidden="true">
+      <div id="interactionPromptEyebrow" class="npc-prompt__eyebrow">Interaction</div>
+      <div id="interactionPromptTitle" class="npc-prompt__title">Press E to interact</div>
+      <div id="interactionPromptLine" class="npc-prompt__line">
+        Use nearby doors, seats, and NPCs.
+      </div>
+    </div>
+
+    <div id="forecastFrenzy" class="forecast-frenzy forecast-frenzy--hidden" aria-hidden="true">
+      <div class="forecast-frenzy__intro-overlay"></div>
+      <div class="forecast-frenzy__fade"></div>
+      <div class="forecast-frenzy__flash"></div>
+
+      <div class="forecast-frenzy__cabinet">
+        <div class="forecast-frenzy__marquee">
+          <div class="forecast-frenzy__marquee-copy">
+            <div class="forecast-frenzy__kicker">Weather Match</div>
+            <strong id="forecastBanner">Weather match</strong>
+          </div>
+          <div id="forecastIntroLine" class="forecast-frenzy__introline">Match the term.</div>
+        </div>
+
+        <div class="forecast-frenzy__stage">
+          <canvas
+            id="forecastFrenzyCanvas"
+            class="forecast-frenzy__canvas"
+            width="960"
+            height="540"
+            aria-label="Forecast Frenzy weather display"
+          ></canvas>
+          <div class="forecast-frenzy__map-tint"></div>
+          <div id="forecastAlert" class="forecast-frenzy__alert">Radar lock</div>
+          <div id="forecastFeedback" class="forecast-frenzy__feedback" aria-live="polite"></div>
+          <div id="forecastStart" class="forecast-frenzy__start" hidden>
+            <div class="forecast-frenzy__start-frame">
+              <div class="forecast-frenzy__start-kicker">WX-01 WEATHER ARCADE</div>
+              <div class="forecast-frenzy__start-title">FORECAST FRENZY</div>
+              <div id="forecastStartCopy" class="forecast-frenzy__start-copy">
+                Press E to start forecast
+              </div>
+              <div class="forecast-frenzy__start-controls">E START  |  1-4 ANSWER</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="forecast-frenzy__question-panel">
+          <div class="forecast-frenzy__question-meta">
+            <div id="forecastQuestionCount" class="forecast-frenzy__question-stat">Question 1 / 10</div>
+            <div id="forecastQuestionScore" class="forecast-frenzy__question-stat">Score 0</div>
+          </div>
+          <div id="forecastQuestionPrompt" class="forecast-frenzy__prompt">Read the map</div>
+          <div id="forecastQuestion" class="forecast-frenzy__question">
+            Storm systems standing by.
+          </div>
+          <div id="forecastAnswers" class="forecast-frenzy__answers"></div>
+        </div>
+
+        <div id="forecastFooter" class="forecast-frenzy__footer">
+          Press 1-4 to answer
+        </div>
+      </div>
+
+      <div id="forecastResult" class="forecast-frenzy__result" hidden>
+        <div class="forecast-frenzy__result-card">
+          <div class="forecast-frenzy__result-kicker">Final Forecast</div>
+          <h2 id="forecastResultRank" class="forecast-frenzy__result-rank">Local Meteorologist</h2>
+          <div id="forecastResultScore" class="forecast-frenzy__result-score">Score 000000</div>
+          <div id="forecastResultSummary" class="forecast-frenzy__result-summary">
+            Accuracy 0%
+          </div>
+          <div id="forecastResultStats" class="forecast-frenzy__result-stats"></div>
+          <div class="forecast-frenzy__result-buttons">
+            <button id="forecastReplayButton" type="button">Replay</button>
+            <button id="forecastExitButton" type="button">Exit</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
