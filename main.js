@@ -10522,24 +10522,6 @@ function addMiniGong({ center, y, scale = 1, rotation = 0 }) {
   disc.position.set(0, 0.16 * scale, 0);
   gong.add(disc);
 
-  const stringMaterial = new THREE.MeshStandardMaterial({
-    color: "#5c4a3a",
-    roughness: 0.9,
-    metalness: 0.02,
-  });
-  const stringLength = barBottomY - discTopY;
-  const stringRadius = 0.002 * scale;
-  const discTopY = 0.16 * scale + 0.075 * scale;
-  const barBottomY = 0.27 * scale - 0.0125 * scale;
-  [-0.055, 0.055].forEach((z) => {
-    const string = new THREE.Mesh(
-      new THREE.CylinderGeometry(stringRadius, stringRadius, stringLength, 6),
-      stringMaterial,
-    );
-    string.position.set(0, (discTopY + barBottomY) / 2, z * scale);
-    gong.add(string);
-  });
-
   enableShadows(gong);
   placePlanObject(gong, center, y, rotation, furnishingGroup);
 }
