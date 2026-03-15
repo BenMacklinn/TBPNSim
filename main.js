@@ -3558,6 +3558,7 @@ function addP3aStorageShelf() {
     color: "#b48863",
     seamColor: "#9c734f",
     footHeight: 0.18,
+    registerAsSeats: true,
   });
 
   const westShelfCenterX = shelfCenter[0] - 2.46;
@@ -8431,7 +8432,7 @@ function addP1P10CornerLighting() {
 }
 
 function addP1P10CornerFurnishings() {
-  addFeatureRug([2.45, 7.02], [4.05, 3.18]);
+  addFeatureRug([2.45, 7.02], [4.05, 4.4]);
   addLSectional({
     corner: [0.87, 8.06],
     horizontalLength: 3.25,
@@ -8441,7 +8442,7 @@ function addP1P10CornerFurnishings() {
     westOffset: 0.3,
   });
   addRoundCoffeeTable([2.88, 6.4], 0.62, 0.4);
-  addChessSet([2.76, 6.38], 0.51, 0.42);
+  addChessSet([2.88, 6.4], 0.51, 0.42);
   addFrontCornerShelves();
   addP1P10CornerShelves();
   addP1P10ShelfDecor();
@@ -9815,6 +9816,7 @@ function addPlushSofa({
   color = "#68717d",
   seamColor = "#5f6773",
   footHeight = 0.05,
+  registerAsSeats = false,
 }) {
   const [width, depth] = size;
   const sofa = new THREE.Group();
@@ -9907,6 +9909,22 @@ function addPlushSofa({
 
   enableShadows(sofa);
   placePlanObject(sofa, center, 0, rotation, furnishingGroup);
+
+  if (registerAsSeats) {
+    const plushSeatHeight = 0.34 + verticalLift;
+    const plushEyeHeight = 1.9;
+    const plushStandOffset = 0.95;
+    for (let i = 0; i < seatCount; i += 1) {
+      const localX = startX + i * (cushionWidth + cushionGap);
+      const localZ = 0.06;
+      const seatCenter = [
+        center[0] + localX * Math.cos(rotation) - localZ * Math.sin(rotation),
+        center[1] + localX * Math.sin(rotation) + localZ * Math.cos(rotation),
+      ];
+      registerSeat(seatCenter, rotation, plushEyeHeight, plushStandOffset, plushSeatHeight);
+    }
+  }
+
   pushPlanRectCollider(center, width, depth, rotation, PLAYER_RADIUS * 0.18);
 }
 
@@ -10078,6 +10096,26 @@ function addLSectional({
 
   enableShadows(sectional);
   placePlanObject(sectional, corner, 0, 0, furnishingGroup);
+
+  const couchSeatHeight = 0.34;
+  const couchEyeHeight = 2.1;
+  const couchStandOffset = 0.95;
+  [0, 1, 2].forEach((i) => {
+    const x = corner[0] + cornerSeat + horizontalSeatWidth / 2 + i * (horizontalSeatWidth + cushionGap);
+    registerSeat([x, corner[1]], Math.PI, couchEyeHeight, couchStandOffset, couchSeatHeight);
+  });
+  [0, 1].forEach((i) => {
+    const z = corner[1] - cornerSeat - verticalSeatDepth / 2 - i * (verticalSeatDepth + cushionGap);
+    registerSeat([corner[0] + westOffset + 0.06, z], -Math.PI / 2, couchEyeHeight, couchStandOffset, couchSeatHeight);
+  });
+  registerSeat(
+    [corner[0] + depth * 0.1, corner[1] - topRunDirection * depth * 0.1],
+    Math.PI * 0.75,
+    couchEyeHeight,
+    couchStandOffset,
+    couchSeatHeight,
+  );
+
   pushPlanRectCollider(
     [corner[0] + horizontalLength / 2, corner[1]],
     horizontalLength,
@@ -10168,10 +10206,10 @@ function addRoundCoffeeTable(center, radius, height) {
   table.add(topRing);
 
   const tray = new THREE.Mesh(
-    new THREE.CylinderGeometry(radius * 0.82, radius * 0.82, 0.1, 44),
+    new THREE.CylinderGeometry(radius * 0.82, radius * 0.82, 0.08, 44),
     innerMaterial,
   );
-  tray.position.y = height - 0.05;
+  tray.position.y = height - 0.08;
   table.add(tray);
 
   enableShadows(table);
@@ -10181,17 +10219,22 @@ function addRoundCoffeeTable(center, radius, height) {
 
 function addChessSet(center, size, tableHeight) {
   const set = new THREE.Group();
+  const boardMaterial = new THREE.MeshStandardMaterial({
+    map: createChessTexture(),
+    roughness: 0.86,
+    metalness: 0.03,
+  });
+  boardMaterial.polygonOffset = true;
+  boardMaterial.polygonOffsetFactor = 1;
+  boardMaterial.polygonOffsetUnits = 1;
   const board = new THREE.Mesh(
     new THREE.BoxGeometry(size, 0.025, size),
-    new THREE.MeshStandardMaterial({
-      map: createChessTexture(),
-      roughness: 0.86,
-      metalness: 0.03,
-    }),
+    boardMaterial,
   );
-  board.position.y = tableHeight + 0.0125;
+  board.position.y = tableHeight + 0.025;
   set.add(board);
 
+  const boardTopY = tableHeight + 0.0375;
   const pieceRows = [0, 1, 6, 7];
   pieceRows.forEach((row) => {
     for (let col = 0; col < 8; col += 1) {
@@ -10202,26 +10245,12 @@ function addChessSet(center, size, tableHeight) {
       const piece = createChessPiece(dark ? "#1e1e1d" : "#f0eee8");
       piece.position.set(
         -size / 2 + size / 16 + col * (size / 8),
-        tableHeight + 0.04,
+        boardTopY + 0.025,
         -size / 2 + size / 16 + row * (size / 8),
       );
       set.add(piece);
     }
   });
-
-  const phone = new THREE.Mesh(
-    new THREE.BoxGeometry(0.16, 0.02, 0.1),
-    new THREE.MeshStandardMaterial({ color: "#d9ddd9", roughness: 0.55 }),
-  );
-  phone.position.set(-0.34, tableHeight + 0.02, 0.28);
-  set.add(phone);
-
-  const remote = new THREE.Mesh(
-    new THREE.BoxGeometry(0.12, 0.02, 0.05),
-    new THREE.MeshStandardMaterial({ color: "#242424", roughness: 0.62 }),
-  );
-  remote.position.set(-0.18, tableHeight + 0.02, 0.31);
-  set.add(remote);
 
   enableShadows(set);
   placePlanObject(set, center, 0, 0, furnishingGroup);
@@ -12671,15 +12700,15 @@ function standUpFromSeat() {
     return;
   }
   const seat = state.seatedSeat;
+  const fwdX = Math.sin(seat.rotation);
+  const fwdZ = Math.cos(seat.rotation);
+  const rightX = Math.cos(seat.rotation);
+  const rightZ = -Math.sin(seat.rotation);
   const candidates = [
-    [
-      seat.center[0] + Math.sin(seat.rotation) * seat.standOffset,
-      seat.center[1] + Math.cos(seat.rotation) * seat.standOffset,
-    ],
-    [
-      seat.center[0] - Math.sin(seat.rotation) * seat.standOffset,
-      seat.center[1] - Math.cos(seat.rotation) * seat.standOffset,
-    ],
+    [seat.center[0] + fwdX * seat.standOffset, seat.center[1] + fwdZ * seat.standOffset],
+    [seat.center[0] - fwdX * seat.standOffset, seat.center[1] - fwdZ * seat.standOffset],
+    [seat.center[0] + rightX * seat.standOffset, seat.center[1] + rightZ * seat.standOffset],
+    [seat.center[0] - rightX * seat.standOffset, seat.center[1] - rightZ * seat.standOffset],
   ];
   const standPoint =
     candidates.find((candidate) => {
