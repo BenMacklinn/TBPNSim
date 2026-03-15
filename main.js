@@ -13992,6 +13992,18 @@ function isWalkable(point) {
     return false;
   }
 
+  const frontDoorWorldZLimit = toWorldPoint([0, OTHER5_DEPTH - 0.5]).z;
+  const frontDoorWorldXMin = toWorldPoint([OTHER5_LEFT, 0]).x;
+  const frontDoorWorldXMax = toWorldPoint([OTHER5_RIGHT, 0]).x;
+  if (
+    inO5Exterior &&
+    point.x >= frontDoorWorldXMin &&
+    point.x <= frontDoorWorldXMax &&
+    point.y < frontDoorWorldZLimit
+  ) {
+    return false;
+  }
+
   if (
     room &&
     (room.id === "newRoom" || room.id === "hangarBay") &&
