@@ -818,6 +818,644 @@ button:active {
   border-radius: 0;
 }
 
+.tyler-board {
+  color: #202634;
+  --board-gap: 10px;
+  --board-cell-size: 92px;
+}
+
+.tyler-board__cabinet {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  padding: 18px;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.72), transparent 24%),
+    linear-gradient(180deg, #e9e9ea, #d8d8d8 58%, #d0d0d1);
+}
+
+.tyler-board[data-visible="false"] .tyler-board__cabinet {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.tyler-board[data-visible="true"] .tyler-board__cabinet {
+  opacity: 1;
+  visibility: visible;
+}
+
+.tyler-board__header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 16px;
+}
+
+.tyler-board__title-group {
+  display: grid;
+  gap: 3px;
+}
+
+.tyler-board__kicker,
+.tyler-board__panel-label,
+.tyler-board__stat-label,
+.tyler-board__tile-type,
+.tyler-board__tile-time,
+.tyler-board__tile-author-handle,
+.tyler-board__footer {
+  font-family: "Courier New", "Lucida Console", monospace;
+}
+
+.tyler-board__kicker {
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(35, 42, 55, 0.6);
+}
+
+.tyler-board__title {
+  font-family: "Arial Rounded MT Bold", "Trebuchet MS", sans-serif;
+  font-size: clamp(1.3rem, 2.8vw, 2rem);
+  color: #212735;
+}
+
+.tyler-board__introline {
+  padding: 12px 14px;
+  border: 1px solid rgba(74, 85, 104, 0.14);
+  background: rgba(255, 255, 255, 0.62);
+  color: rgba(30, 37, 48, 0.84);
+  font-size: 0.9rem;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(84, 89, 101, 0.08);
+}
+
+.tyler-board__exit {
+  border-radius: 12px;
+  padding: 10px 14px;
+  background: #202735;
+  color: #f4f7fb;
+  box-shadow: 0 14px 28px rgba(23, 28, 40, 0.16);
+}
+
+.tyler-board__exit:hover {
+  background: #2a3345;
+}
+
+.tyler-board__layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: 18px;
+  margin-top: 18px;
+  min-height: calc(100vh - 150px);
+}
+
+.tyler-board__sidebar {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.tyler-board__panel,
+.tyler-board__stats,
+.tyler-board__controls,
+.tyler-board__instructions,
+.tyler-board__frame,
+.tyler-board__result-card {
+  border: 1px solid rgba(88, 95, 109, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.08)),
+    rgba(246, 246, 247, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 10px 24px rgba(101, 103, 111, 0.08);
+}
+
+.tyler-board__panel {
+  padding: 16px;
+}
+
+.tyler-board__panel-label {
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(43, 50, 63, 0.56);
+}
+
+.tyler-board__panel-value {
+  margin-top: 6px;
+  font-family: "Arial Rounded MT Bold", "Trebuchet MS", sans-serif;
+  font-size: 1.35rem;
+  color: #202634;
+}
+
+.tyler-board__stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+}
+
+.tyler-board__stat {
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(98, 104, 118, 0.1);
+}
+
+.tyler-board__stat-label {
+  display: block;
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(46, 53, 66, 0.54);
+}
+
+.tyler-board__stat-value {
+  display: block;
+  margin-top: 6px;
+  font-family: "Arial Rounded MT Bold", "Trebuchet MS", sans-serif;
+  font-size: 1.25rem;
+  color: #212736;
+}
+
+.tyler-board__controls {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.tyler-board__controls button,
+.tyler-board__result-buttons button {
+  border-radius: 12px;
+}
+
+.tyler-board__instructions {
+  padding: 14px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: rgba(37, 44, 57, 0.82);
+}
+
+.tyler-board__legend {
+  display: grid;
+  gap: 8px;
+}
+
+.tyler-board__legend-item {
+  padding: 10px 12px;
+  border: 1px solid rgba(98, 104, 118, 0.1);
+  background: rgba(255, 255, 255, 0.62);
+  font-size: 0.82rem;
+  color: rgba(37, 44, 57, 0.84);
+}
+
+.tyler-board__legend-item--target {
+  box-shadow: inset 4px 0 0 #ef5f5c;
+}
+
+.tyler-board__legend-item--exit {
+  box-shadow: inset 4px 0 0 #ffb24d;
+}
+
+.tyler-board__frame {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  padding: 18px;
+  overflow: hidden;
+}
+
+.tyler-board__board {
+  position: relative;
+  width: min(74vh, 74vw, 680px);
+  aspect-ratio: 1;
+}
+
+.tyler-board__cells,
+.tyler-board__tiles {
+  position: absolute;
+  inset: 0;
+}
+
+.tyler-board__cells {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-rows: repeat(6, minmax(0, 1fr));
+  gap: var(--board-gap);
+}
+
+.tyler-board__cell {
+  display: grid;
+  place-items: center;
+  border: 1px dashed rgba(76, 88, 106, 0.16);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.4), transparent),
+    rgba(205, 208, 215, 0.48);
+  color: transparent;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.tyler-board__cell[data-exit="true"] {
+  border-style: solid;
+  border-color: rgba(238, 84, 84, 0.74);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.6), transparent),
+    linear-gradient(135deg, rgba(255, 106, 106, 0.34), rgba(255, 191, 96, 0.28));
+  color: rgba(142, 32, 32, 0.92);
+  font-family: "Courier New", "Lucida Console", monospace;
+  box-shadow:
+    0 0 0 2px rgba(239, 95, 92, 0.18),
+    0 0 24px rgba(255, 178, 77, 0.22);
+  font-weight: 700;
+}
+
+.tyler-board__tile {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border: 0;
+  padding: 0;
+  border-radius: 12px;
+  background: transparent;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  box-shadow:
+    0 16px 28px rgba(93, 97, 109, 0.16),
+    0 1px 0 rgba(255, 255, 255, 0.72) inset;
+  transition:
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 140ms ease,
+    filter 140ms ease;
+}
+
+.tyler-board__tile-dragzone {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.tyler-board__tile[data-movable="true"] {
+  cursor: pointer;
+}
+
+.tyler-board__tile[data-movable="true"]:hover,
+.tyler-board__tile[data-movable="true"]:focus-visible {
+  box-shadow:
+    0 18px 32px rgba(53, 100, 204, 0.22),
+    0 0 0 2px rgba(99, 144, 255, 0.34);
+}
+
+.tyler-board__tile[data-movable="true"]:active {
+  box-shadow:
+    0 12px 20px rgba(53, 100, 204, 0.18),
+    0 0 0 2px rgba(99, 144, 255, 0.3);
+}
+
+.tyler-board__direction {
+  position: absolute;
+  z-index: 3;
+  display: block;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  opacity: 0.94;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    opacity 120ms ease,
+    filter 120ms ease;
+}
+
+.tyler-board__direction:hover,
+.tyler-board__direction:focus-visible {
+  opacity: 1;
+  filter: brightness(1.02);
+}
+
+.tyler-board__direction:active {
+  opacity: 1;
+}
+
+.tyler-board__direction--up {
+  top: 0;
+  left: 9px;
+  right: 9px;
+  height: 12px;
+}
+
+.tyler-board__direction--right {
+  top: 9px;
+  right: 0;
+  bottom: 9px;
+  width: 12px;
+}
+
+.tyler-board__direction--down {
+  bottom: 0;
+  left: 9px;
+  right: 9px;
+  height: 12px;
+}
+
+.tyler-board__direction--left {
+  top: 9px;
+  left: 0;
+  bottom: 9px;
+  width: 12px;
+}
+
+.tyler-board__direction-line {
+  position: absolute;
+  display: block;
+  border-radius: 999px;
+  background: rgba(94, 108, 129, 0.18);
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.tyler-board__direction--up .tyler-board__direction-line,
+.tyler-board__direction--down .tyler-board__direction-line {
+  top: 3px;
+  left: 0;
+  right: 0;
+  height: 4px;
+}
+
+.tyler-board__direction--left .tyler-board__direction-line,
+.tyler-board__direction--right .tyler-board__direction-line {
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 4px;
+}
+
+.tyler-board__direction:hover .tyler-board__direction-line,
+.tyler-board__direction:focus-visible .tyler-board__direction-line,
+.tyler-board__tile[data-movable="true"]:hover .tyler-board__direction-line {
+  background: rgba(70, 74, 82, 0.72);
+  box-shadow: 0 0 0 1px rgba(70, 74, 82, 0.08);
+}
+
+.tyler-board__direction:active .tyler-board__direction-line {
+  background: rgba(53, 57, 64, 0.88);
+}
+
+.tyler-board__direction-line {
+  background: rgba(74, 79, 88, 0.52);
+}
+
+.tyler-board__tile-callout {
+  position: absolute;
+  left: 50%;
+  top: -12px;
+  z-index: 2;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #ef5f5c;
+  color: #fff8f8;
+  font-family: "Courier New", "Lucida Console", monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: 0 10px 18px rgba(239, 95, 92, 0.24);
+}
+
+.tyler-board__tile-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(102, 111, 129, 0.18);
+  background: #f7f7f8;
+}
+
+.tyler-board__tile[data-width="2"] .tyler-board__tile-card,
+.tyler-board__tile[data-width="3"] .tyler-board__tile-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.74), rgba(247, 247, 248, 0.96)),
+    #f7f7f8;
+}
+
+.tyler-board__tile[data-width="3"] .tyler-board__tile-card {
+  box-shadow: inset 0 0 0 1px rgba(94, 118, 162, 0.12);
+}
+
+.tyler-board__tile[data-height="2"] .tyler-board__tile-card,
+.tyler-board__tile[data-height="3"] .tyler-board__tile-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(244, 246, 250, 0.96)),
+    #f6f7f9;
+}
+
+.tyler-board__tile-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px;
+  background: #ededee;
+  border-bottom: 1px solid rgba(108, 116, 131, 0.12);
+}
+
+.tyler-board__tile-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tyler-board__tile-badge {
+  min-width: 26px;
+  padding: 3px 5px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  text-align: center;
+  color: #f7fbff;
+  font-family: "Arial Rounded MT Bold", "Trebuchet MS", sans-serif;
+}
+
+.tyler-board__tile[data-accent="green"] .tyler-board__tile-badge {
+  background: #67c682;
+}
+
+.tyler-board__tile[data-accent="red"] .tyler-board__tile-badge {
+  background: #ea6966;
+}
+
+.tyler-board__tile[data-accent="blue"] .tyler-board__tile-badge {
+  background: #6788ee;
+}
+
+.tyler-board__tile[data-accent="yellow"] .tyler-board__tile-badge {
+  background: #e3ba57;
+  color: #433111;
+}
+
+.tyler-board__tile[data-tile-type="target"] .tyler-board__tile-card {
+  background:
+    linear-gradient(180deg, rgba(255, 103, 103, 0.12), rgba(255, 255, 255, 0.96)),
+    #fff5f5;
+  border-color: rgba(237, 101, 101, 0.46);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 128, 128, 0.18),
+    0 0 0 2px rgba(240, 95, 92, 0.22);
+}
+
+.tyler-board__tile[data-tile-type="target"] .tyler-board__tile-badge {
+  background: #ef5f5c;
+}
+
+.tyler-board__tile[data-tile-type="target"] .tyler-board__tile-copy {
+  font-weight: 700;
+  color: #8c2323;
+}
+
+.tyler-board__tile-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  padding: 8px 8px 0;
+}
+
+.tyler-board__tile-author-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.tyler-board__tile-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(180deg, #3c4759, #222a38);
+  color: #f5f8fd;
+  font-size: 0.62rem;
+  font-family: "Arial Rounded MT Bold", "Trebuchet MS", sans-serif;
+}
+
+.tyler-board__tile-author-copy {
+  min-width: 0;
+}
+
+.tyler-board__tile-author-name {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #202634;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tyler-board__tile-author-handle {
+  font-size: 0.58rem;
+  color: rgba(47, 55, 68, 0.62);
+}
+
+.tyler-board__tile-type,
+.tyler-board__tile-time {
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  color: rgba(50, 58, 71, 0.64);
+}
+
+.tyler-board__tile-copy {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.22;
+  color: #2a3140;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+
+.tyler-board__tile[data-width="2"] .tyler-board__tile-copy {
+  -webkit-line-clamp: 3;
+}
+
+.tyler-board__tile[data-width="3"] .tyler-board__tile-copy {
+  -webkit-line-clamp: 2;
+  font-size: 0.72rem;
+}
+
+.tyler-board__tile[data-height="2"] .tyler-board__tile-copy,
+.tyler-board__tile[data-height="3"] .tyler-board__tile-copy {
+  -webkit-line-clamp: 6;
+}
+
+.tyler-board__tile-footer {
+  display: flex;
+  justify-content: flex-start;
+  padding: 8px;
+}
+
+.tyler-board__tile-tag {
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: #c7dff9;
+  color: #24354f;
+  font-size: 0.6rem;
+}
+
+.tyler-board__footer {
+  margin-top: 14px;
+  text-align: center;
+  font-size: 0.78rem;
+  color: rgba(43, 50, 61, 0.72);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.tyler-board__result {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(12, 18, 29, 0.24);
+}
+
+.tyler-board__result[hidden] {
+  display: none;
+}
+
+.tyler-board__result-card {
+  width: min(420px, calc(100vw - 48px));
+  padding: 24px;
+  text-align: center;
+}
+
+.tyler-board__result-title {
+  margin: 10px 0 0;
+  font-family: "Arial Rounded MT Bold", "Trebuchet MS", sans-serif;
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+  color: #212736;
+}
+
+.tyler-board__result-meta {
+  margin-top: 10px;
+  color: rgba(43, 50, 61, 0.76);
+  font-family: "Courier New", "Lucida Console", monospace;
+}
+
+.tyler-board__result-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+
 @keyframes forecast-shake {
   0%,
   100% {
@@ -883,5 +1521,39 @@ button:active {
   .forecast-frenzy__result-card {
     width: calc(100vw - 24px);
     padding: 22px 18px;
+  }
+
+  .tyler-board__header {
+    grid-template-columns: 1fr;
+  }
+
+  .tyler-board__layout {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+
+  .tyler-board__stats {
+    grid-template-columns: 1fr;
+  }
+
+  .tyler-board__frame {
+    padding: 12px;
+  }
+
+  .tyler-board__board {
+    width: min(92vw, 560px);
+  }
+
+  .tyler-board__tile-copy {
+    -webkit-line-clamp: 3;
+  }
+
+  .tyler-board__footer {
+    margin-top: 10px;
+  }
+
+  .tyler-board__tile-callout {
+    top: -10px;
+    font-size: 0.56rem;
   }
 }

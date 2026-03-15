@@ -102,6 +102,72 @@
       </div>
     </div>
 
+    <div id="tylerBoard" class="forecast-frenzy tyler-board forecast-frenzy--hidden" aria-hidden="true">
+      <div class="forecast-frenzy__intro-overlay"></div>
+      <div class="forecast-frenzy__fade"></div>
+      <div class="forecast-frenzy__flash"></div>
+
+      <div class="tyler-board__cabinet">
+        <div class="tyler-board__header">
+          <div class="tyler-board__title-group">
+            <div class="tyler-board__kicker">Tyler Puzzle Console</div>
+            <strong class="tyler-board__title">Exit Grid</strong>
+          </div>
+          <div id="tylerBoardIntroLine" class="tyler-board__introline">Drag blocks freely, or use the border rails to shove them.</div>
+          <button id="tylerBoardExitButton" class="tyler-board__exit" type="button">Exit</button>
+        </div>
+
+        <div class="tyler-board__layout">
+          <section class="tyler-board__sidebar">
+            <div class="tyler-board__panel">
+              <div class="tyler-board__panel-label">Level</div>
+              <div id="tylerBoardLevelName" class="tyler-board__panel-value">Signal Run</div>
+            </div>
+            <div class="tyler-board__stats">
+              <div class="tyler-board__stat">
+                <span class="tyler-board__stat-label">Moves</span>
+                <strong id="tylerBoardMoves" class="tyler-board__stat-value">0</strong>
+              </div>
+              <div class="tyler-board__stat">
+                <span class="tyler-board__stat-label">Time</span>
+                <strong id="tylerBoardTimer" class="tyler-board__stat-value">00:00</strong>
+              </div>
+              <div class="tyler-board__stat">
+                <span class="tyler-board__stat-label">Score</span>
+                <strong id="tylerBoardScore" class="tyler-board__stat-value">1000</strong>
+              </div>
+            </div>
+            <div class="tyler-board__instructions">
+              Drag a tweet in any open direction to move it by distance. For a full shove, tap the thin border rail on the side you want, and the block will slide until it hits a blocker.
+            </div>
+            <div class="tyler-board__legend">
+              <div class="tyler-board__legend-item tyler-board__legend-item--target">Red tweet = target</div>
+              <div class="tyler-board__legend-item tyler-board__legend-item--exit">EXIT cell = goal</div>
+              <div class="tyler-board__legend-item">Border rails = full shove</div>
+            </div>
+          </section>
+
+          <div class="tyler-board__frame">
+            <div id="tylerBoardBoard" class="tyler-board__board" aria-label="Sliding puzzle board"></div>
+          </div>
+        </div>
+
+        <div id="tylerBoardMessage" class="tyler-board__footer">Clear a lane for the red target tweet, then slide it into EXIT.</div>
+
+        <div id="tylerBoardResult" class="tyler-board__result" hidden>
+          <div class="tyler-board__result-card">
+            <div class="tyler-board__panel-label">Run Complete</div>
+            <h2 id="tylerBoardResultTitle" class="tyler-board__result-title">Exit reached</h2>
+            <div id="tylerBoardResultMeta" class="tyler-board__result-meta">00:21 • score 812</div>
+            <div class="tyler-board__result-buttons">
+              <button id="tylerBoardReplayButton" type="button">Play Again</button>
+              <button id="tylerBoardResultExitButton" type="button">Exit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="./main.js"></script>
   </body>
 </html>

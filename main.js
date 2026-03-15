@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { Reflector } from "three/addons/objects/Reflector.js";
 import { ForecastFrenzyGame } from "./forecast-frenzy.js";
+import { TylerBoardOverlay } from "./tyler-board.js";
 
 const FLOOR_THICKNESS = 0.08;
 const WALL_HEIGHT = 6.2;
@@ -79,6 +80,14 @@ const HANGAR_INTERIOR_WALL_X = HANGAR_INNER_EAST_X - INNER_WALL_THICKNESS / 2;
 const OTHER2_AREA = `${((HANGAR_INNER_EAST_X - RIGHT_STACK_X) * (I1_Z - FRONT_EDGE_Z)).toFixed(1)} m²`;
 const OTHER4_AREA = `${((HANGAR_INNER_EAST_X - RIGHT_STACK_X) * (OTHER4_BOTTOM - I1_Z)).toFixed(1)} m²`;
 const OTHER3_AREA = `${((HANGAR_INNER_EAST_X - RIGHT_STACK_X) * (OTHER3_BOTTOM - OTHER3_TOP)).toFixed(1)} m²`;
+const PRODUCTION_IMAGE_PATHS = ["./production1.png", "./production2.png", "./production3.png", "./production4.png"];
+const loadRandomProductionTexture = () => {
+  const path = PRODUCTION_IMAGE_PATHS[Math.floor(Math.random() * PRODUCTION_IMAGE_PATHS.length)];
+  const tex = new THREE.TextureLoader().load(new URL(path, import.meta.url).href);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+};
+
 const SITTING_POSE = {
   verticalOffset: 0.08,
   headRotationY: -0.08,
@@ -437,6 +446,7 @@ const interactionPromptEyebrow = document.querySelector("#interactionPromptEyebr
 const interactionPromptTitle = document.querySelector("#interactionPromptTitle");
 const interactionPromptLine = document.querySelector("#interactionPromptLine");
 const forecastFrenzyRoot = document.querySelector("#forecastFrenzy");
+const tylerBoardRoot = document.querySelector("#tylerBoard");
 const coordX = document.querySelector("#coordX");
 const coordY = document.querySelector("#coordY");
 const coordZ = document.querySelector("#coordZ");
@@ -535,6 +545,10 @@ const npcPromptWorldPosition = new THREE.Vector3();
 const forecastFrenzy = new ForecastFrenzyGame({
   root: forecastFrenzyRoot,
   onExit: handleForecastFrenzyExit,
+});
+const tylerBoard = new TylerBoardOverlay({
+  root: tylerBoardRoot,
+  onExit: handleTylerBoardExit,
 });
 
 const architectureGroup = new THREE.Group();
@@ -1610,7 +1624,7 @@ function buildFurnishings() {
     weatherman.leftArmPivot.rotation.z = -1.24;
   }
   registerForecastNpc(weatherman, {
-    promptEyebrow: "Ben",
+    promptEyebrow: "Intern Ben",
     promptTitle: "Press E to Forecast",
     lines: [
       "Let's see if you can read the sky.",
@@ -1737,6 +1751,35 @@ function registerChatNpc(character, {
   }
   interactiveNpcs.push({
     type: "chat",
+    promptEyebrow,
+    promptTitle,
+    lines,
+    promptRadius,
+    avatar: character,
+    interactionPoint: character.interactionPoint,
+    promptAnchor: character.head,
+    promptOffsetY: 0.42,
+    baseRootY: character.root.position.y,
+    baseHeadRotationX: character.head.rotation.x,
+    baseHeadRotationY: character.head.rotation.y,
+    baseLeftArmX: character.leftArmPivot.rotation.x,
+    baseRightArmX: character.rightArmPivot.rotation.x,
+    phaseOffset: Math.random() * Math.PI * 2,
+  });
+}
+
+function registerTylerBoardNpc(character, {
+  promptEyebrow = "Tyler",
+  promptTitle = "Press E to play",
+  lines = ["One of five easy boards loads each run.", "Slide pieces along their orientation to free the red tweet.", "Wide and tall tweet blocks move as one piece."],
+  promptRadius = 1.8,
+} = {}) {
+  if (!character) {
+    return;
+  }
+
+  interactiveNpcs.push({
+    type: "tylerBoard",
     promptEyebrow,
     promptTitle,
     lines,
@@ -2841,13 +2884,10 @@ function addI2I4MediaShelf() {
     roughness: 0.34,
     metalness: 0.14,
   });
-  const screenMaterial = new THREE.MeshStandardMaterial({
-    color: "#090a0c",
-    map: createDisplaySceneTexture("forest"),
-    emissive: "#0d1116",
-    emissiveIntensity: 0.24,
-    roughness: 0.22,
-    metalness: 0.04,
+  const screenTexture = loadRandomProductionTexture();
+  const screenMaterial = new THREE.MeshBasicMaterial({
+    map: screenTexture,
+    toneMapped: false,
   });
 
   const wallPlate = new THREE.Mesh(
@@ -2923,9 +2963,9 @@ function addP3FlagAndGong() {
     metalness: 0.46,
   });
   const discMaterial = new THREE.MeshStandardMaterial({
-    color: "#b8862f",
-    roughness: 0.34,
-    metalness: 0.82,
+    color: "#fff9c4",
+    roughness: 0.28,
+    metalness: 0.9,
   });
 
   const frameWidth = 1.85;
@@ -2946,6 +2986,22 @@ function addP3FlagAndGong() {
   topBar.position.set(0, frameHeight, 0);
   gong.add(topBar);
 
+  const stringMaterial = new THREE.MeshStandardMaterial({
+    color: "#8b7355",
+    roughness: 0.9,
+    metalness: 0,
+  });
+  const stringTopY = frameHeight - 0.04;
+  const stringBottomY = 1.18 + 0.58 * Math.cos(Math.PI / 6);
+  const stringLength = stringTopY - stringBottomY;
+  const stringX = 0.58 * Math.sin(Math.PI / 6);
+  const stringGeometry = new THREE.CylinderGeometry(0.006, 0.006, stringLength, 8);
+  [-1, 1].forEach((sign) => {
+    const string = new THREE.Mesh(stringGeometry, stringMaterial);
+    string.position.set(sign * stringX, (stringTopY + stringBottomY) / 2, 0);
+    gong.add(string);
+  });
+
   const gongDisc = new THREE.Mesh(
     new THREE.CylinderGeometry(0.58, 0.58, 0.08, 36),
     discMaterial,
@@ -2957,7 +3013,7 @@ function addP3FlagAndGong() {
   const gongCenter = new THREE.Mesh(
     new THREE.CylinderGeometry(0.12, 0.12, 0.09, 20),
     new THREE.MeshStandardMaterial({
-      color: "#25272a",
+      color: "#5c4033",
       roughness: 0.5,
       metalness: 0.2,
     }),
@@ -5669,9 +5725,9 @@ function addP3aStorageShelf() {
     placePlanObject(laptop, point, 0, rotation, furnishingGroup);
   }
 
-  function createDeskCornerMonitor(frameColor = "#111317") {
+  function createDeskCornerMonitor(frameColor = "#111317", texturePath = "./sqquoiasunrise.jpg") {
     const monitorTexture = new THREE.TextureLoader().load(
-      new URL("./sqquoiasunrise.jpg", import.meta.url).href,
+      new URL(texturePath, import.meta.url).href,
     );
     monitorTexture.colorSpace = THREE.SRGBColorSpace;
 
@@ -5725,8 +5781,9 @@ function addP3aStorageShelf() {
     deskWidth = 2.6,
     deskDepth = 1.18,
     deskHeight = 0.64,
+    texturePath,
   } = {}) {
-    const monitor = createDeskCornerMonitor();
+    const monitor = createDeskCornerMonitor("#111317", texturePath ?? "./sqquoiasunrise.jpg");
 
     monitor.position.set(
       -deskWidth / 2 + 0.52,
@@ -5740,8 +5797,8 @@ function addP3aStorageShelf() {
     placePlanObject(setup, center, 0, rotation, furnishingGroup);
   }
 
-  function addDeskCornerMonitorAt(point, rotation = 0, y = 1.08, frameColor = "#111317") {
-    const monitor = createDeskCornerMonitor(frameColor);
+  function addDeskCornerMonitorAt(point, rotation = 0, y = 1.08, frameColor = "#111317", texturePath) {
+    const monitor = createDeskCornerMonitor(frameColor, texturePath ?? "./sqquoiasunrise.jpg");
     const worldPoint = toWorldPoint(point);
     monitor.position.set(worldPoint.x, y, worldPoint.z);
     monitor.rotation.y = rotation;
@@ -5850,12 +5907,16 @@ function addP3aStorageShelf() {
     );
   }
 
+  const productionImagePaths = ["./production1.png", "./production2.png", "./production3.png", "./production4.png"];
+  const loadRandomProductionTexture = () => {
+    const path = productionImagePaths[Math.floor(Math.random() * productionImagePaths.length)];
+    const tex = new THREE.TextureLoader().load(new URL(path, import.meta.url).href);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  };
+
   function addProductionDeskSetup(center, rotation) {
     const setup = new THREE.Group();
-    const deskMonitorTexture = new THREE.TextureLoader().load(
-      new URL("./sqquoiasunrise.jpg", import.meta.url).href,
-    );
-    deskMonitorTexture.colorSpace = THREE.SRGBColorSpace;
     const frameMaterial = new THREE.MeshStandardMaterial({
       color: "#0f1113",
       roughness: 0.74,
@@ -5909,9 +5970,9 @@ function addP3aStorageShelf() {
       setup.add(monitor);
     };
 
-    addMonitor([0.78, 0.46], [0.08, 2.04, -0.42], deskMonitorTexture, 0, 0.79);
-    addMonitor([0.78, 0.46], [-0.42, 1.52, -0.26], deskMonitorTexture, 0.14, 0.27);
-    addMonitor([0.78, 0.46], [0.42, 1.52, -0.26], deskMonitorTexture, -0.14, 0.27);
+    addMonitor([0.78, 0.46], [0.08, 2.04, -0.42], loadRandomProductionTexture(), 0, 0.79);
+    addMonitor([0.78, 0.46], [-0.42, 1.52, -0.26], loadRandomProductionTexture(), 0.14, 0.27);
+    addMonitor([0.78, 0.46], [0.42, 1.52, -0.26], loadRandomProductionTexture(), -0.14, 0.27);
 
     const switcher = new THREE.Group();
     const consoleBody = new THREE.Mesh(
@@ -6064,18 +6125,10 @@ function addP3aStorageShelf() {
 
   function addMiddleTableMonitorRow(center, rotation = 0) {
     const setup = new THREE.Group();
-    const middleTableMonitorTexture = new THREE.TextureLoader().load(
-      new URL("./sqquoiasunrise.jpg", import.meta.url).href,
-    );
-    middleTableMonitorTexture.colorSpace = THREE.SRGBColorSpace;
     const frameMaterial = new THREE.MeshStandardMaterial({
       color: "#101215",
       roughness: 0.72,
       metalness: 0.08,
-    });
-    const panelMaterial = new THREE.MeshBasicMaterial({
-      map: middleTableMonitorTexture,
-      toneMapped: false,
     });
 
     const addMonitor = ({
@@ -6087,6 +6140,11 @@ function addP3aStorageShelf() {
       stemHeight = 0.36,
       standBehind = false,
     }) => {
+      const monitorTexture = loadRandomProductionTexture();
+      const panelMaterial = new THREE.MeshBasicMaterial({
+        map: monitorTexture,
+        toneMapped: false,
+      });
       const monitor = new THREE.Group();
       const frame = new THREE.Mesh(
         new THREE.BoxGeometry(size[0], size[1], 0.045),
@@ -6643,9 +6701,7 @@ function addP3aStorageShelf() {
 
   function addWestSideStandingTv(center, rotation = 0) {
     const tv = new THREE.Group();
-    const standingTvTexture = new THREE.TextureLoader().load(
-      new URL("./sqquoiasunrise.jpg", import.meta.url).href,
-    );
+    const standingTvTexture = loadRandomProductionTexture();
     standingTvTexture.colorSpace = THREE.SRGBColorSpace;
     const standMaterial = new THREE.MeshStandardMaterial({
       color: "#1a1d21",
@@ -6706,7 +6762,7 @@ function addP3aStorageShelf() {
   function addTallVerticalMonitor(center, rotation = 0, { suspended = false } = {}) {
     const display = new THREE.Group();
     const monitorTexture = new THREE.TextureLoader().load(
-      new URL("./sqquoiasunrise.jpg", import.meta.url).href,
+      new URL("./streamchat.png", import.meta.url).href,
     );
     monitorTexture.colorSpace = THREE.SRGBColorSpace;
     const standMaterial = new THREE.MeshStandardMaterial({
@@ -6819,6 +6875,20 @@ function addP3aStorageShelf() {
   addMiddleTableMonitorRow(midHangarTableCenter, 0);
   addMiddleTableDeskProps(midHangarTableCenter, 0);
   addTallDeskStool(offsetPlanPoint(midHangarTableCenter, [0.08, -0.76], 0), 0.12);
+  const scott = addStandingCharacter({
+    planPosition: (() => {
+      const p = offsetPlanPoint(midHangarTableCenter, [-0.6, -0.35], 0);
+      return [p[0], p[1] - 0.8];
+    })(),
+    rotation: Math.atan2(0.6, 0.35) + Math.PI,
+    hairColor: "#3d3428",
+    tieColor: "#9f6745",
+    suitColor: "#434d56",
+    shirtColor: "#f3efe6",
+  });
+  if (scott) {
+    registerChatNpc(scott, { promptEyebrow: "Scott", promptTitle: "Press E to talk" });
+  }
   const hangarCenterDeskCenter = [5.19, 17.8];
   addDoubleLayerDesk(hangarCenterDeskCenter, Math.PI * 1.5, 2.2);
   addDeskPaperAndMarkers(hangarCenterDeskCenter, Math.PI * 1.5, {
@@ -6906,6 +6976,7 @@ function addP3aStorageShelf() {
     Math.PI * 1.5 + THREE.MathUtils.degToRad(20),
     1.32,
     "#8b929b",
+    "./brandonTV.png",
   );
   const southHangarDeskChairCenter = [southHangarDeskCenter[0] - 0.9, southHangarDeskCenter[1]];
   addRollingChair(southHangarDeskChairCenter, Math.PI / 2, { registerAsSeat: false });
@@ -7452,7 +7523,7 @@ function addP3aStorageShelf() {
         chairCenter[0] + (hangarStageCenter[0] - chairCenter[0]) * towardTable,
         chairCenter[1] + (hangarStageCenter[1] - chairCenter[1]) * towardTable,
       ];
-      addSeatedCharacter({
+      const seated = addSeatedCharacter({
         planPosition: characterPos,
         rotation: chairRotation + Math.PI,
         seatHeight: 0.62,
@@ -7467,6 +7538,13 @@ function addP3aStorageShelf() {
         suitColor: "#434d56",
         shirtColor: "#f3efe6",
       });
+      const isHostRight = chairCenter[0] > hangarStageCenter[0];
+      if (seated) {
+        registerChatNpc(seated, {
+          promptEyebrow: isHostRight ? "Jordi" : "John",
+          promptTitle: "Press E to talk",
+        });
+      }
     }
     addStudioTableMicrophone(hangarStageCenter, chairCenter, 4.2 / 2, 0.96);
   });
@@ -7489,8 +7567,9 @@ function addP3aStorageShelf() {
     deskWidth: 2.6,
     deskDepth: 1.18,
     deskHeight: 0.64,
+    texturePath: "./TylerX.png",
   });
-  addDeskCornerMonitorAt([6.5, 19.85], Math.PI / 2, 1.18);
+  addDeskCornerMonitorAt([6.5, 19.85], Math.PI / 2, 1.18, "#111317", "./reelsmax.png");
   const eastDeskChairCenter = [10, 22.5];
   const eastDeskChairRotation = Math.atan2(
     eastHangarDeskCenter[0] - eastDeskChairCenter[0],
@@ -7507,10 +7586,10 @@ function addP3aStorageShelf() {
     shirtColor: "#f3efe6",
   });
   if (tyler) {
-    registerChatNpc(tyler, {
+    registerTylerBoardNpc(tyler, {
       promptEyebrow: "Tyler",
-      promptTitle: "Press E to talk",
-      lines: ["Hey.", "What's up?", "Busy with the desk."],
+      promptTitle: "Press E to play",
+      lines: ["Try the puzzle on my board.", "Each run picks one of five easy starts.", "Click the side you want a piece to slide toward."],
     });
   }
   addRug([4.2, 13.5], [2.4, 1.6], "#3c3f43", Math.PI);
@@ -7536,13 +7615,41 @@ function addP3aStorageShelf() {
     [8.2, 14.0],
     westSideTableRotation + 0.16,
   );
+  const ben = addStandingCharacter({
+    planPosition: (() => {
+      const p = offsetPlanPoint(westSideTableCenter, [-0.35, -0.4], westSideTableRotation);
+      return [p[0], p[1] - 0.8];
+    })(),
+    rotation: westSideTableRotation,
+    hairColor: "#5a4a3a",
+    tieColor: "#9f6745",
+    suitColor: "#434d56",
+    shirtColor: "#f3efe6",
+  });
+  if (ben) {
+    registerChatNpc(ben, { promptEyebrow: "Ben", promptTitle: "Press E to talk" });
+  }
   addWestSideStandingTv([2.53, 15.77], westSideTableRotation);
   addStandingTable(eastSideTableCenter, eastSideTableRotation, 1.85);
   addProductionDeskSetup(eastSideTableCenter, eastSideTableRotation);
   addTallDeskStool(
-    [3.8, 14.5],
+    [3.8, 14.2],
     eastSideTableRotation - 0.14,
   );
+  const michael = addStandingCharacter({
+    planPosition: (() => {
+      const p = offsetPlanPoint(eastSideTableCenter, [0.35, -0.4], eastSideTableRotation);
+      return [p[0], p[1] - 0.8];
+    })(),
+    rotation: eastSideTableRotation,
+    hairColor: "#d3bc6d",
+    tieColor: "#9f6745",
+    suitColor: "#434d56",
+    shirtColor: "#f3efe6",
+  });
+  if (michael) {
+    registerChatNpc(michael, { promptEyebrow: "Michael", promptTitle: "Press E to talk" });
+  }
 
   const wardrobeWidth = 2.68;
   const wardrobeDepth = 0.56;
@@ -8104,13 +8211,9 @@ function addP1P10CornerArchitecture() {
   tvMount.add(arm);
   const screen = new THREE.Mesh(
     new THREE.BoxGeometry(1.04, 0.58, 0.08),
-    new THREE.MeshStandardMaterial({
-      color: "#121314",
-      map: createDisplaySceneTexture("aurora"),
-      emissive: "#090a0b",
-      emissiveIntensity: 0.22,
-      roughness: 0.34,
-      metalness: 0.08,
+    new THREE.MeshBasicMaterial({
+      map: loadRandomProductionTexture(),
+      toneMapped: false,
     }),
   );
   screen.position.set(0, 0, -0.2);
@@ -10746,10 +10849,11 @@ function addHangarRearShelf(center, rotation = 0) {
     roughness: 0.72,
     metalness: 0.16,
   });
-  const projectorTexture = new THREE.TextureLoader().load("./sqquoiasunrise.jpg");
+  const projectorTexture = new THREE.TextureLoader().load(
+    new URL("./projector-screen.png", import.meta.url).href,
+  );
   projectorTexture.colorSpace = THREE.SRGBColorSpace;
   projectorTexture.center.set(0.5, 0.5);
-  projectorTexture.rotation = Math.PI;
   const screenMaterial = new THREE.MeshStandardMaterial({
     color: "#f2f2ee",
     emissive: "#d9deef",
@@ -12489,6 +12593,23 @@ function handleForecastFrenzyExit() {
   syncUi();
 }
 
+function startTylerBoard(npc) {
+  clearMovementState();
+  state.seatedSeat = null;
+  playerState.motion = 0;
+  state.mode = "minigame";
+  unlockPointer();
+  hideInteractionPrompt();
+  const line = npc.lines[Math.floor(Math.random() * npc.lines.length)] ?? "Desk feed coming online.";
+  tylerBoard.start({ introLine: line });
+  syncUi();
+}
+
+function handleTylerBoardExit() {
+  state.mode = "walk";
+  syncUi();
+}
+
 function sitInSeat(seat) {
   state.seatedSeat = seat;
   clearMovementState();
@@ -12511,13 +12632,18 @@ function strikeGong(gong) {
   if (!gongAudio) {
     gongAudio = new Audio(new URL("./Gong Sound Effect 4.mp3", import.meta.url).href);
   }
-  gongAudio.currentTime = 0;
+  const startAnimation = () => {
+    gongHitAnimations.push({
+      discParts: gong.discParts,
+      startTime: performance.now(),
+      duration: 0.6,
+    });
+  };
+  gongAudio.removeEventListener("playing", gongAudio._gongPlayingHandler);
+  gongAudio._gongPlayingHandler = startAnimation;
+  gongAudio.addEventListener("playing", startAnimation, { once: true });
+  gongAudio.currentTime = 1;
   gongAudio.play().catch(() => {});
-  gongHitAnimations.push({
-    discParts: gong.discParts,
-    startTime: performance.now(),
-    duration: 0.6,
-  });
 }
 
 function updateGongAnimations() {
@@ -12592,6 +12718,10 @@ function toggleNearestInteraction() {
     const npc = nearestInteraction.target;
     if (npc.type === "forecast") {
       startForecastFrenzy(npc);
+      return;
+    }
+    if (npc.type === "tylerBoard") {
+      startTylerBoard(npc);
     }
     return;
   }
@@ -13880,6 +14010,7 @@ function animate() {
   updateInteractionPrompt(elapsedTime);
   updateCoordinateDisplay();
   forecastFrenzy.update(delta, elapsedTime);
+  tylerBoard.update(delta, elapsedTime);
   mirrorDistanceLods.forEach(({ reflective, fallback, threshold }) => {
     const worldPosition = new THREE.Vector3();
     reflective.getWorldPosition(worldPosition);
@@ -14110,7 +14241,10 @@ function maybeLockWalkthrough() {
 
 function onKeyDown(event) {
   if (state.mode === "minigame") {
-    forecastFrenzy.handleKeyDown(event);
+    if (forecastFrenzy.handleKeyDown(event)) {
+      return;
+    }
+    tylerBoard.handleKeyDown(event);
     return;
   }
 
