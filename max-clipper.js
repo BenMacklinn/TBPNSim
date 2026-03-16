@@ -4,6 +4,7 @@ const PREVIEW_ACTIVE_LIMIT = 3;
 const MAX_ENGAGEMENT = 100;
 const RESOLVE_DURATION = 0.42;
 const FEEDBACK_DURATION = 0.9;
+const READY_FADE_DURATION = 0.55;
 
 const SLOT_BINDINGS = Array.from({ length: 9 }, (_, index) => ({
   index,
@@ -217,16 +218,24 @@ class ClipperAudio {
   }
 
   playGood() {
-    this.playTone({ frequency: 860, duration: 0.08, gain: 0.022, type: "triangle" });
-    this.playTone({ frequency: 1120, duration: 0.12, gain: 0.018, type: "triangle", when: 0.05 });
+    this.playTone({ frequency: 820, duration: 0.07, gain: 0.024, type: "triangle" });
+    this.playTone({ frequency: 1080, duration: 0.09, gain: 0.022, type: "triangle", when: 0.04 });
+    this.playTone({ frequency: 1360, duration: 0.11, gain: 0.018, type: "sine", when: 0.08 });
   }
 
   playBad() {
-    this.playTone({ frequency: 280, duration: 0.12, gain: 0.022, type: "sawtooth", slideTo: 180 });
+    this.playTone({ frequency: 320, duration: 0.08, gain: 0.022, type: "square", slideTo: 250 });
+    this.playTone({ frequency: 210, duration: 0.14, gain: 0.02, type: "sawtooth", when: 0.04, slideTo: 150 });
   }
 
   playMiss() {
     this.playTone({ frequency: 220, duration: 0.16, gain: 0.018, type: "square", slideTo: 150 });
+  }
+
+  playStart() {
+    this.playTone({ frequency: 460, duration: 0.07, gain: 0.016, type: "triangle" });
+    this.playTone({ frequency: 620, duration: 0.08, gain: 0.017, type: "triangle", when: 0.04 });
+    this.playTone({ frequency: 840, duration: 0.1, gain: 0.018, type: "triangle", when: 0.08 });
   }
 
   playFinish() {
@@ -260,6 +269,8 @@ export class MaxClipperOverlay {
     this.resultRankElement = root.querySelector("#maxClipperResultRank");
     this.resultSummaryElement = root.querySelector("#maxClipperResultSummary");
     this.resultStatsElement = root.querySelector("#maxClipperResultStats");
+    this.startOverlayElement = root.querySelector("#maxClipperStart");
+    this.startButton = root.querySelector("#maxClipperStartButton");
     this.exitButton = root.querySelector("#maxClipperExitButton");
     this.replayButton = root.querySelector("#maxClipperReplayButton");
     this.resultExitButton = root.querySelector("#maxClipperResultExitButton");
@@ -272,7 +283,10 @@ export class MaxClipperOverlay {
     this.introLine = "Whack the postable moments before they duck back under.";
     this.resultData = null;
     this.stats = this.createEmptyStats();
+    this.introOverlayAlpha = 1;
+    this.readyElapsed = 0;
 
+    this.startButton?.addEventListener("click", () => this.beginRun());
     this.exitButton?.addEventListener("click", () => this.exit("exit"));
     this.replayButton?.addEventListener("click", () => this.start({ introLine: this.introLine }));
     this.resultExitButton?.addEventListener("click", () => this.exit("exit"));
@@ -349,6 +363,21 @@ export class MaxClipperOverlay {
     }
   }
 
+  prepareReadyState() {
+    this.elapsed = 0;
+    this.feedback = { text: "", tone: "neutral", remaining: 0 };
+    this.resultData = null;
+    this.stats = this.createEmptyStats();
+    this.readyElapsed = 0;
+    this.introOverlayAlpha = 1;
+    this.phase = "ready";
+
+    this.slotViews.forEach((slot) => {
+      slot.opportunity = null;
+      slot.pulse = 0;
+    });
+  }
+
   start({ introLine = "Whack the postable moments before they duck back under." } = {}) {
     this.audio.ensureContext();
     this.introLine = introLine;
@@ -356,6 +385,16 @@ export class MaxClipperOverlay {
     this.root.classList.remove("forecast-frenzy--hidden");
     this.root.setAttribute("aria-hidden", "false");
     this.resultElement.hidden = true;
+    this.prepareReadyState();
+    this.sync();
+  }
+
+  beginRun() {
+    if (!this.active || this.phase !== "ready") {
+      return;
+    }
+
+    this.audio.playStart();
     this.resetRun();
     this.sync();
   }
@@ -694,15 +733,25 @@ export class MaxClipperOverlay {
       this.engagementFillElement.style.width = `${this.stats.engagement}%`;
     }
     if (this.footerElement) {
-      if (this.phase === "result") {
+      if (this.phase === "ready") {
+        this.footerElement.textContent = "Let the fade land, then click Start when you're ready.";
+      } else if (this.phase === "result") {
         this.footerElement.textContent = "Press Enter, Space, or R to run it back. Escape exits.";
       } else {
         this.footerElement.textContent = "Whack a pop-up or use 1-9 before it ducks back under.";
       }
     }
     if (this.statusPillElement) {
-      this.statusPillElement.textContent = this.phase === "result" ? "Session Over" : "Live Feed";
-      this.statusPillElement.dataset.tone = this.phase === "result" ? "result" : "live";
+      this.statusPillElement.textContent =
+        this.phase === "ready" ? "Stand By" : this.phase === "result" ? "Session Over" : "Live Feed";
+      this.statusPillElement.dataset.tone =
+        this.phase === "ready" ? "result" : this.phase === "result" ? "result" : "live";
+    }
+    this.root.style.setProperty("--forecast-intro-overlay", this.introOverlayAlpha.toFixed(3));
+    if (this.startOverlayElement) {
+      const visible = this.phase === "ready";
+      this.startOverlayElement.hidden = !visible;
+      this.startOverlayElement.style.display = visible ? "" : "none";
     }
 
     this.syncGrid();
@@ -731,6 +780,15 @@ export class MaxClipperOverlay {
       return false;
     }
 
+    if (this.phase === "ready") {
+      if ((event.code === "Enter" || event.code === "Space") && !event.repeat) {
+        event.preventDefault();
+        this.beginRun();
+        return true;
+      }
+      return false;
+    }
+
     const slotIndex = KEY_TO_SLOT[event.code];
     if (slotIndex == null) {
       return false;
@@ -742,7 +800,18 @@ export class MaxClipperOverlay {
   }
 
   update(delta) {
-    if (!this.active || this.phase !== "playing") {
+    if (!this.active) {
+      return;
+    }
+
+    if (this.phase === "ready") {
+      this.readyElapsed += delta;
+      this.introOverlayAlpha = clamp(1 - this.readyElapsed / READY_FADE_DURATION, 0, 1);
+      this.sync();
+      return;
+    }
+
+    if (this.phase !== "playing") {
       return;
     }
 
