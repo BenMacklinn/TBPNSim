@@ -168,6 +168,197 @@
       </div>
     </div>
 
+    <div id="nikChiefOfStaff" class="forecast-frenzy nik-chief-of-staff forecast-frenzy--hidden" aria-hidden="true">
+      <div class="forecast-frenzy__fade"></div>
+
+      <div class="nik-chief-of-staff__cabinet">
+        <header class="nik-chief-of-staff__header">
+          <div class="nik-chief-of-staff__brand">TBPN</div>
+
+          <div class="nik-chief-of-staff__title-group">
+            <div class="nik-chief-of-staff__kicker">Nik's Minigame</div>
+            <strong class="nik-chief-of-staff__title">Chief of Staff</strong>
+          </div>
+
+          <div class="nik-chief-of-staff__headline">
+            <div id="nikChiefOfStaffWeekLabel" class="nik-chief-of-staff__week-label">Mar 16 - 22</div>
+            <div id="nikChiefOfStaffIntroLine" class="nik-chief-of-staff__introline">
+              Keep Nik's calendar clear.
+            </div>
+          </div>
+
+          <button id="nikChiefOfStaffExitButton" class="nik-chief-of-staff__exit" type="button">Exit</button>
+        </header>
+
+        <div class="nik-chief-of-staff__layout">
+          <aside class="nik-chief-of-staff__sidebar">
+            <div class="nik-chief-of-staff__card nik-chief-of-staff__stats-card">
+              <div class="nik-chief-of-staff__card-label">Live Score</div>
+              <div class="nik-chief-of-staff__stats-grid">
+                <div class="nik-chief-of-staff__stat">
+                  <span>Score</span>
+                  <strong id="nikChiefOfStaffScore">0</strong>
+                </div>
+              </div>
+            </div>
+
+            <div class="nik-chief-of-staff__card nik-chief-of-staff__controls">
+              <div class="nik-chief-of-staff__card-label">Controls</div>
+              <p><code>&larr;</code> <code>&rarr;</code> move</p>
+              <p><code>&uarr;</code> or <code>X</code> rotate</p>
+              <p><code>Z</code> rotate back</p>
+              <p><code>&darr;</code> soft drop</p>
+              <p><code>Space</code> hard drop</p>
+              <p><code>P</code> pause</p>
+            </div>
+          </aside>
+
+          <section class="nik-chief-of-staff__calendar-shell">
+            <div class="nik-chief-of-staff__toolbar">
+              <div class="nik-chief-of-staff__toolbar-copy">
+                <div class="nik-chief-of-staff__toolbar-kicker">Google Calendar Crisis Desk</div>
+                <strong>Week View</strong>
+              </div>
+              <div id="nikChiefOfStaffStatusPill" class="nik-chief-of-staff__status-pill" data-tone="live">Live</div>
+            </div>
+
+            <div class="nik-chief-of-staff__calendar">
+              <div class="nik-chief-of-staff__corner">PST</div>
+              <div id="nikChiefOfStaffDayHeader" class="nik-chief-of-staff__day-header"></div>
+              <div id="nikChiefOfStaffTimeColumn" class="nik-chief-of-staff__time-column"></div>
+              <div id="nikChiefOfStaffBoard" class="nik-chief-of-staff__board" aria-label="TBPN Chief of Staff calendar board"></div>
+            </div>
+          </section>
+        </div>
+
+        <div id="nikChiefOfStaffFooter" class="nik-chief-of-staff__footer">
+          Arrows move. Up rotates. Space hard drops. Keep the week clear.
+        </div>
+
+        <div id="nikChiefOfStaffResult" class="forecast-frenzy__result" hidden>
+          <div class="forecast-frenzy__result-card nik-chief-of-staff__result-card">
+            <div class="forecast-frenzy__result-kicker">Week Wrapped</div>
+            <h2 id="nikChiefOfStaffResultRank" class="forecast-frenzy__result-rank">Calendar Intern</h2>
+            <div id="nikChiefOfStaffResultSummary" class="forecast-frenzy__result-summary">
+              0 time slots cleared in 00:00.
+            </div>
+            <div id="nikChiefOfStaffResultStats" class="forecast-frenzy__result-stats"></div>
+            <div class="forecast-frenzy__result-buttons">
+              <button id="nikChiefOfStaffReplayButton" type="button">Replay</button>
+              <button id="nikChiefOfStaffResultExitButton" type="button">Exit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="maxClipper" class="forecast-frenzy max-clipper forecast-frenzy--hidden" aria-hidden="true">
+      <div class="forecast-frenzy__intro-overlay"></div>
+      <div class="forecast-frenzy__fade"></div>
+      <div class="forecast-frenzy__flash"></div>
+
+      <div class="max-clipper__cabinet">
+        <div class="max-clipper__marquee">
+          <div class="max-clipper__title-group">
+            <div class="max-clipper__kicker">Max Live Clipper</div>
+            <strong class="max-clipper__title">Timeline Sniper</strong>
+          </div>
+          <div id="maxClipperIntroLine" class="max-clipper__introline">
+            Whack the postable moments before they duck back under.
+          </div>
+          <button id="maxClipperExitButton" class="max-clipper__exit" type="button">Exit</button>
+        </div>
+
+        <div class="max-clipper__layout">
+          <aside class="max-clipper__sidebar">
+            <div class="max-clipper__panel">
+              <div class="max-clipper__panel-label">Live Metrics</div>
+              <div class="max-clipper__stats">
+                <div class="max-clipper__stat">
+                  <span class="max-clipper__stat-label">Score</span>
+                  <strong id="maxClipperScore" class="max-clipper__stat-value">0</strong>
+                </div>
+                <div class="max-clipper__stat">
+                  <span class="max-clipper__stat-label">Combo</span>
+                  <strong id="maxClipperCombo" class="max-clipper__stat-value">0x</strong>
+                </div>
+                <div class="max-clipper__stat">
+                  <span class="max-clipper__stat-label">Clipped</span>
+                  <strong id="maxClipperClipped" class="max-clipper__stat-value">0</strong>
+                </div>
+                <div class="max-clipper__stat">
+                  <span class="max-clipper__stat-label">Time Left</span>
+                  <strong id="maxClipperTimer" class="max-clipper__stat-value">00:40</strong>
+                </div>
+              </div>
+            </div>
+
+            <div class="max-clipper__panel">
+              <div class="max-clipper__panel-label">Engagement Meter</div>
+              <div class="max-clipper__engagement">
+                <div class="max-clipper__engagement-bar">
+                  <div id="maxClipperEngagementFill" class="max-clipper__engagement-fill"></div>
+                </div>
+                <strong id="maxClipperEngagementValue" class="max-clipper__engagement-value">100%</strong>
+              </div>
+            </div>
+
+            <div class="max-clipper__panel max-clipper__controls">
+              <div class="max-clipper__panel-label">Controls</div>
+              <p>Click a hole or press <code>1-9</code>.</p>
+              <p>Bright pop-ups are worth clipping.</p>
+              <p>Dull pop-ups are dead air.</p>
+              <p>Flashy trap pop-ups break your run.</p>
+            </div>
+          </aside>
+
+          <section class="max-clipper__stage">
+            <div class="max-clipper__stage-head">
+              <div class="max-clipper__live-pill">LIVE</div>
+              <div class="max-clipper__stage-copy">
+                <strong>Whack-a-clip burrow</strong>
+                <span>Smack the X-worthy moments before they duck back underground.</span>
+              </div>
+              <div id="maxClipperStatusPill" class="max-clipper__status-pill" data-tone="live">Live Feed</div>
+            </div>
+
+            <div id="maxClipperFeedback" class="max-clipper__feedback" data-visible="false" data-tone="good"></div>
+            <div id="maxClipperGrid" class="max-clipper__grid" aria-label="Max clipping grid"></div>
+
+            <div class="max-clipper__timeline-shell">
+              <div class="max-clipper__timeline-meta">
+                <span>Episode timeline</span>
+                <strong id="maxClipperTimelineClock">00:40</strong>
+              </div>
+              <div class="max-clipper__timeline-track">
+                <div id="maxClipperTimelineProgress" class="max-clipper__timeline-progress"></div>
+                <div id="maxClipperTimelineEvents" class="max-clipper__timeline-events"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div id="maxClipperFooter" class="max-clipper__footer">
+          Whack a pop-up or use 1-9 before it ducks back under.
+        </div>
+
+        <div id="maxClipperResult" class="forecast-frenzy__result" hidden>
+          <div class="forecast-frenzy__result-card max-clipper__result-card">
+            <div class="forecast-frenzy__result-kicker">Session Wrapped</div>
+            <h2 id="maxClipperResultRank" class="forecast-frenzy__result-rank">Clip Warmup</h2>
+            <div id="maxClipperResultSummary" class="forecast-frenzy__result-summary">
+              0 bangers clipped.
+            </div>
+            <div id="maxClipperResultStats" class="forecast-frenzy__result-stats"></div>
+            <div class="forecast-frenzy__result-buttons">
+              <button id="maxClipperReplayButton" type="button">Replay</button>
+              <button id="maxClipperResultExitButton" type="button">Exit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div id="jordiHero" class="forecast-frenzy jordi-hero forecast-frenzy--hidden" aria-hidden="true">
       <div class="forecast-frenzy__intro-overlay"></div>
       <div class="forecast-frenzy__fade"></div>

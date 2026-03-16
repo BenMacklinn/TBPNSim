@@ -2,6 +2,8 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { Reflector } from "three/addons/objects/Reflector.js";
+import { MaxClipperOverlay } from "./max-clipper.js";
+import { NikChiefOfStaffOverlay } from "./chief-of-staff.js";
 import { ForecastFrenzyGame } from "./forecast-frenzy.js";
 import { JordiSoundboardHeroOverlay } from "./jordi-soundboard-hero.js";
 import { TylerBoardOverlay } from "./tyler-board.js";
@@ -448,6 +450,8 @@ const interactionPromptTitle = document.querySelector("#interactionPromptTitle")
 const interactionPromptLine = document.querySelector("#interactionPromptLine");
 const forecastFrenzyRoot = document.querySelector("#forecastFrenzy");
 const tylerBoardRoot = document.querySelector("#tylerBoard");
+const nikChiefOfStaffRoot = document.querySelector("#nikChiefOfStaff");
+const maxClipperRoot = document.querySelector("#maxClipper");
 const jordiHeroRoot = document.querySelector("#jordiHero");
 const coordX = document.querySelector("#coordX");
 const coordY = document.querySelector("#coordY");
@@ -584,6 +588,14 @@ const forecastFrenzy = new ForecastFrenzyGame({
 const tylerBoard = new TylerBoardOverlay({
   root: tylerBoardRoot,
   onExit: handleTylerBoardExit,
+});
+const nikChiefOfStaff = new NikChiefOfStaffOverlay({
+  root: nikChiefOfStaffRoot,
+  onExit: handleNikChiefOfStaffExit,
+});
+const maxClipper = new MaxClipperOverlay({
+  root: maxClipperRoot,
+  onExit: handleMaxClipperExit,
 });
 const jordiHero = new JordiSoundboardHeroOverlay({
   root: jordiHeroRoot,
@@ -1819,6 +1831,72 @@ function registerTylerBoardNpc(character, {
 
   interactiveNpcs.push({
     type: "tylerBoard",
+    promptEyebrow,
+    promptTitle,
+    lines,
+    promptRadius,
+    avatar: character,
+    interactionPoint: character.interactionPoint,
+    promptAnchor: character.head,
+    promptOffsetY: 0.42,
+    baseRootY: character.root.position.y,
+    baseHeadRotationX: character.head.rotation.x,
+    baseHeadRotationY: character.head.rotation.y,
+    baseLeftArmX: character.leftArmPivot.rotation.x,
+    baseRightArmX: character.rightArmPivot.rotation.x,
+    phaseOffset: Math.random() * Math.PI * 2,
+  });
+}
+
+function registerNikChiefOfStaffNpc(character, {
+  promptEyebrow = "Nik",
+  promptTitle = "Press E to staff the calendar",
+  lines = [
+    "The week is packed. Clear it out.",
+    "Chief of Staff mode is live.",
+    "Do not let the calendar overflow.",
+  ],
+  promptRadius = 1.8,
+} = {}) {
+  if (!character) {
+    return;
+  }
+
+  interactiveNpcs.push({
+    type: "nikChiefOfStaff",
+    promptEyebrow,
+    promptTitle,
+    lines,
+    promptRadius,
+    avatar: character,
+    interactionPoint: character.interactionPoint,
+    promptAnchor: character.head,
+    promptOffsetY: 0.42,
+    baseRootY: character.root.position.y,
+    baseHeadRotationX: character.head.rotation.x,
+    baseHeadRotationY: character.head.rotation.y,
+    baseLeftArmX: character.leftArmPivot.rotation.x,
+    baseRightArmX: character.rightArmPivot.rotation.x,
+    phaseOffset: Math.random() * Math.PI * 2,
+  });
+}
+
+function registerMaxClipperNpc(character, {
+  promptEyebrow = "Max",
+  promptTitle = "Press E to clip",
+  lines = [
+    "Catch the X-worthy moments before they vanish.",
+    "You're clipping live. Don't miss the bangers.",
+    "The dead air is bait. Grab the real moments.",
+  ],
+  promptRadius = 1.8,
+} = {}) {
+  if (!character) {
+    return;
+  }
+
+  interactiveNpcs.push({
+    type: "maxClipper",
     promptEyebrow,
     promptTitle,
     lines,
@@ -6986,10 +7064,14 @@ function addP3aStorageShelf() {
     shirtColor: "#f3efe6",
   });
   if (nik) {
-    registerChatNpc(nik, {
+    registerNikChiefOfStaffNpc(nik, {
       promptEyebrow: "Nik",
-      promptTitle: "Press E to talk",
-      lines: ["Hey.", "What's up?", "Just working."],
+      promptTitle: "Press E to staff the calendar",
+      lines: [
+        "The calendar is a mess.",
+        "Try Chief of Staff.",
+        "Keep the week from collapsing.",
+      ],
     });
   }
   const mirroredSingleDeskCenter = [PLAN_WIDTH - hangarCenterDeskCenter[0], hangarCenterDeskCenter[1] + 0.2];
@@ -7025,10 +7107,14 @@ function addP3aStorageShelf() {
     shirtColor: "#f3efe6",
   });
   if (max) {
-    registerChatNpc(max, {
+    registerMaxClipperNpc(max, {
       promptEyebrow: "Max",
-      promptTitle: "Press E to talk",
-      lines: ["Hey.", "What's up?", "Working on some stuff."],
+      promptTitle: "Press E to clip",
+      lines: [
+        "The live feed is moving fast.",
+        "Clip the good stuff before it disappears.",
+        "Postable moments only.",
+      ],
     });
   }
   addRollingChair([huggingSingleDeskCenter[0] + 0.95, huggingSingleDeskCenter[1]], -Math.PI / 2);
@@ -12725,6 +12811,42 @@ function handleTylerBoardExit() {
   syncUi();
 }
 
+function startNikChiefOfStaff(npc) {
+  clearMovementState();
+  state.seatedSeat = null;
+  playerState.motion = 0;
+  state.mode = "minigame";
+  unlockPointer();
+  hideInteractionPrompt();
+  const line = npc.lines[Math.floor(Math.random() * npc.lines.length)] ?? "Keep the week clear.";
+  nikChiefOfStaff.start({ introLine: line });
+  syncUi();
+}
+
+function handleNikChiefOfStaffExit() {
+  state.mode = "walk";
+  syncUi();
+}
+
+function startMaxClipper(npc) {
+  clearMovementState();
+  state.seatedSeat = null;
+  playerState.motion = 0;
+  state.mode = "minigame";
+  unlockPointer();
+  hideInteractionPrompt();
+  const line =
+    npc.lines[Math.floor(Math.random() * npc.lines.length)] ??
+    "Catch the X-worthy moments before they vanish.";
+  maxClipper.start({ introLine: line });
+  syncUi();
+}
+
+function handleMaxClipperExit() {
+  state.mode = "walk";
+  syncUi();
+}
+
 function startJordiHero(npc) {
   clearMovementState();
   state.seatedSeat = null;
@@ -12862,6 +12984,14 @@ function toggleNearestInteraction() {
     }
     if (npc.type === "tylerBoard") {
       startTylerBoard(npc);
+      return;
+    }
+    if (npc.type === "nikChiefOfStaff") {
+      startNikChiefOfStaff(npc);
+      return;
+    }
+    if (npc.type === "maxClipper") {
+      startMaxClipper(npc);
       return;
     }
     if (npc.type === "jordiHero") {
@@ -14155,6 +14285,8 @@ function animate() {
   updateCoordinateDisplay();
   forecastFrenzy.update(delta, elapsedTime);
   tylerBoard.update(delta, elapsedTime);
+  nikChiefOfStaff.update(delta, elapsedTime);
+  maxClipper.update(delta, elapsedTime);
   jordiHero.update(delta, elapsedTime);
   mirrorDistanceLods.forEach(({ reflective, fallback, threshold }) => {
     const worldPosition = new THREE.Vector3();
@@ -14412,6 +14544,12 @@ function onKeyDown(event) {
       return;
     }
     if (tylerBoard.handleKeyDown(event)) {
+      return;
+    }
+    if (nikChiefOfStaff.handleKeyDown(event)) {
+      return;
+    }
+    if (maxClipper.handleKeyDown(event)) {
       return;
     }
     jordiHero.handleKeyDown(event);
