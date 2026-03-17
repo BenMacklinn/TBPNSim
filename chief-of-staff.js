@@ -3,6 +3,9 @@ const BOARD_ROWS = 20;
 const PREVIEW_COUNT = 3;
 const START_HOUR = 8;
 const SCORE_BY_CLEAR = [0, 100, 300, 500, 800];
+const INTRO_FADE_OUT = 1.8;
+const INTRO_HOLD = 0.5;
+const INTRO_FADE_IN = 1.8;
 
 const PIECE_LIBRARY = {
   I: {
@@ -103,6 +106,10 @@ const ROTATION_KICKS = [[0, 0], [-1, 0], [1, 0], [-2, 0], [2, 0], [0, -1]];
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function easeOutCubic(value) {
+  return 1 - (1 - value) ** 3;
 }
 
 function shuffle(values) {
@@ -351,7 +358,11 @@ export class NikChiefOfStaffOverlay {
     this.lastQueueSignature = "";
     this.active = false;
     this.phase = "hidden";
+    this.phaseTime = 0;
     this.introLine = "Keep Nik's calendar clear.";
+    this.fadeAlpha = 0;
+    this.introOverlayAlpha = 0;
+    this.cabinetVisible = false;
 
     this.exitButton?.addEventListener("click", () => this.exit("exit"));
     this.replayButton?.addEventListener("click", () => this.start({ introLine: this.introLine }));
@@ -425,7 +436,11 @@ export class NikChiefOfStaffOverlay {
     this.resetState();
     this.message = introLine;
     this.active = true;
-    this.phase = "playing";
+    this.phase = "intro";
+    this.phaseTime = 0;
+    this.fadeAlpha = 0;
+    this.introOverlayAlpha = 0;
+    this.cabinetVisible = false;
     this.root.classList.remove("forecast-frenzy--hidden");
     this.root.setAttribute("aria-hidden", "false");
     this.resultElement.hidden = true;
@@ -441,6 +456,7 @@ export class NikChiefOfStaffOverlay {
 
     this.active = false;
     this.phase = "hidden";
+    this.cabinetVisible = false;
     this.root.classList.add("forecast-frenzy--hidden");
     this.root.setAttribute("aria-hidden", "true");
     this.resultElement.hidden = true;
@@ -800,7 +816,9 @@ export class NikChiefOfStaffOverlay {
   }
 
   sync() {
-    this.root.dataset.visible = this.active ? "true" : "false";
+    this.root.dataset.visible = this.cabinetVisible ? "true" : "false";
+    this.root.style.setProperty("--forecast-fade", this.fadeAlpha.toFixed(3));
+    this.root.style.setProperty("--forecast-intro-overlay", this.introOverlayAlpha.toFixed(3));
 
     if (this.introLineElement) {
       this.introLineElement.textContent = this.introLine;
@@ -827,7 +845,10 @@ export class NikChiefOfStaffOverlay {
       this.currentPieceTagElement.textContent = this.activePiece ? this.activePiece.person.shortLabel : "--";
     }
     if (this.statusPillElement) {
-      if (this.phase === "paused") {
+      if (this.phase === "intro") {
+        this.statusPillElement.textContent = "Loading";
+        this.statusPillElement.dataset.tone = "paused";
+      } else if (this.phase === "paused") {
         this.statusPillElement.textContent = "Paused";
         this.statusPillElement.dataset.tone = "paused";
       } else if (this.phase === "result") {
@@ -839,7 +860,9 @@ export class NikChiefOfStaffOverlay {
       }
     }
     if (this.footerElement) {
-      if (this.phase === "result") {
+      if (this.phase === "intro") {
+        this.footerElement.textContent = "Stand by.";
+      } else if (this.phase === "result") {
         this.footerElement.textContent = "Press Enter or Space to restart. Escape exits.";
       } else if (this.phase === "paused") {
         this.footerElement.textContent = "Press P, Enter, or Space to resume. Escape exits.";
@@ -874,6 +897,10 @@ export class NikChiefOfStaffOverlay {
         event.preventDefault();
         return true;
       }
+      return false;
+    }
+
+    if (this.phase === "intro") {
       return false;
     }
 
@@ -952,6 +979,34 @@ export class NikChiefOfStaffOverlay {
 
   update(delta) {
     if (!this.active) {
+      return;
+    }
+
+    if (this.phase === "intro") {
+      this.phaseTime += delta;
+      const totalIntro = INTRO_FADE_OUT + INTRO_HOLD + INTRO_FADE_IN;
+
+      if (this.phaseTime >= totalIntro) {
+        this.phase = "playing";
+        this.phaseTime = 0;
+        this.cabinetVisible = true;
+        this.introOverlayAlpha = 0;
+        this.sync();
+        return;
+      }
+
+      if (this.phaseTime < INTRO_FADE_OUT) {
+        this.introOverlayAlpha = easeOutCubic(clamp(this.phaseTime / INTRO_FADE_OUT, 0, 1));
+      } else if (this.phaseTime < INTRO_FADE_OUT + INTRO_HOLD) {
+        this.introOverlayAlpha = 1;
+        this.cabinetVisible = true;
+      } else {
+        const fadeInProgress = (this.phaseTime - INTRO_FADE_OUT - INTRO_HOLD) / INTRO_FADE_IN;
+        this.introOverlayAlpha = 1 - easeOutCubic(clamp(fadeInProgress, 0, 1));
+        this.cabinetVisible = true;
+      }
+
+      this.sync();
       return;
     }
 

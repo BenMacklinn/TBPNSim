@@ -23,6 +23,39 @@
       <span id="coordZ">z: 0</span>
     </div>
 
+    <div id="walkKeyHud" class="walk-key-hud" aria-hidden="true">
+      <div class="walk-key-hud__label">Move</div>
+      <div class="walk-key-hud__grid">
+        <span id="walkKeyW" class="walk-key-hud__key">W</span>
+        <span id="walkKeyA" class="walk-key-hud__key">A</span>
+        <span id="walkKeyS" class="walk-key-hud__key">S</span>
+        <span id="walkKeyD" class="walk-key-hud__key">D</span>
+      </div>
+      <div class="walk-key-hud__extras">
+        <span id="walkKeyShift" class="walk-key-hud__key walk-key-hud__key--wide">Shift</span>
+        <span id="walkKeyJump" class="walk-key-hud__key walk-key-hud__key--wide">Jump</span>
+      </div>
+    </div>
+
+    <div id="walkLogoHud" class="walk-logo-hud" aria-hidden="true">
+      <img
+        class="walk-logo-hud__static"
+        src="./TBPN Static Logos v2 (4) (1).png"
+        alt="TBPN presented by Ramp"
+      />
+      <div class="walk-logo-hud__ticker" aria-hidden="true">
+        <video
+          class="walk-logo-hud__ticker-video"
+          src="./ScrollingLogos.mov"
+          autoplay
+          muted
+          loop
+          playsinline
+          preload="auto"
+        ></video>
+      </div>
+    </div>
+
     <div id="interactionPrompt" class="npc-prompt npc-prompt--hidden" aria-hidden="true">
       <div id="interactionPromptEyebrow" class="npc-prompt__eyebrow">Interaction</div>
       <div id="interactionPromptTitle" class="npc-prompt__title">Press E to interact</div>
@@ -169,6 +202,7 @@
     </div>
 
     <div id="nikChiefOfStaff" class="forecast-frenzy nik-chief-of-staff forecast-frenzy--hidden" aria-hidden="true">
+      <div class="forecast-frenzy__intro-overlay"></div>
       <div class="forecast-frenzy__fade"></div>
 
       <div class="nik-chief-of-staff__cabinet">
@@ -364,6 +398,253 @@
             <div class="forecast-frenzy__result-buttons">
               <button id="maxClipperReplayButton" type="button">Replay</button>
               <button id="maxClipperResultExitButton" type="button">Exit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="johnSponsorRead" class="forecast-frenzy john-sponsor-read forecast-frenzy--hidden" aria-hidden="true">
+      <div class="forecast-frenzy__intro-overlay"></div>
+      <div class="forecast-frenzy__fade"></div>
+      <div id="johnSponsorReadStart" class="forecast-frenzy__start" hidden>
+        <div class="forecast-frenzy__start-frame john-sponsor-read__start-frame">
+          <div class="forecast-frenzy__start-kicker">John's Minigame</div>
+          <div class="forecast-frenzy__start-title">Sponsor Read Sprint</div>
+          <div class="forecast-frenzy__start-copy">
+            Deliver five live sponsor reads. Accuracy times speed, and every typo shows up instantly.
+          </div>
+          <div class="forecast-frenzy__start-controls">Click Start or press Enter / Space</div>
+          <button id="johnSponsorReadStartButton" type="button">Start</button>
+        </div>
+      </div>
+
+      <div class="john-sponsor-read__cabinet">
+        <div class="john-sponsor-read__marquee">
+          <div class="john-sponsor-read__title-group">
+            <div class="john-sponsor-read__kicker">John's Minigame</div>
+            <strong class="john-sponsor-read__title">Sponsor Read Sprint</strong>
+          </div>
+          <div id="johnSponsorReadIntroLine" class="john-sponsor-read__introline">
+            Five sponsor reads. Accuracy times speed. Keep the copy clean before the clock burns out.
+          </div>
+          <button id="johnSponsorReadExitButton" class="john-sponsor-read__exit" type="button">Exit</button>
+        </div>
+
+        <div class="john-sponsor-read__layout">
+          <aside class="john-sponsor-read__sidebar">
+            <div class="john-sponsor-read__panel">
+              <div class="john-sponsor-read__panel-label">Live Metrics</div>
+              <div class="john-sponsor-read__stats">
+                <div class="john-sponsor-read__stat">
+                  <span class="john-sponsor-read__stat-label">Read</span>
+                  <strong id="johnSponsorReadRound" class="john-sponsor-read__stat-value">0 / 5</strong>
+                </div>
+                <div class="john-sponsor-read__stat">
+                  <span class="john-sponsor-read__stat-label">Avg Score</span>
+                  <strong id="johnSponsorReadAverageScore" class="john-sponsor-read__stat-value">0</strong>
+                </div>
+                <div class="john-sponsor-read__stat">
+                  <span class="john-sponsor-read__stat-label">Accuracy</span>
+                  <strong id="johnSponsorReadAverageAccuracy" class="john-sponsor-read__stat-value">--</strong>
+                </div>
+                <div class="john-sponsor-read__stat">
+                  <span class="john-sponsor-read__stat-label">Time Left</span>
+                  <strong id="johnSponsorReadTimer" class="john-sponsor-read__stat-value">--</strong>
+                </div>
+              </div>
+            </div>
+
+            <div class="john-sponsor-read__panel john-sponsor-read__controls">
+              <div class="john-sponsor-read__panel-label">Controls</div>
+              <p>Type the line exactly as shown.</p>
+              <p><code>Backspace</code> fixes the read.</p>
+              <p><code>Enter</code> or <code>Space</code> starts from standby.</p>
+              <p><code>Escape</code> exits the sponsor desk.</p>
+            </div>
+          </aside>
+
+          <section class="john-sponsor-read__stage">
+            <div class="john-sponsor-read__stage-head">
+              <div class="john-sponsor-read__live-pill">LIVE READ</div>
+              <div class="john-sponsor-read__stage-copy">
+                <strong>Sponsor copy desk</strong>
+                <span>Read the line clean. Correct characters go green, misses go red, and the score multiplies accuracy by completion.</span>
+              </div>
+              <div id="johnSponsorReadStatusPill" class="john-sponsor-read__status-pill" data-tone="standby">Stand By</div>
+            </div>
+
+            <div id="johnSponsorReadFeedback" class="john-sponsor-read__feedback" data-visible="false" data-tone="good"></div>
+
+            <div class="john-sponsor-read__copy-shell">
+              <div class="john-sponsor-read__copy-card">
+                <div class="john-sponsor-read__copy-meta">
+                  <div id="johnSponsorReadBrand" class="john-sponsor-read__brand">Sponsor Deck</div>
+                  <div id="johnSponsorReadIndex" class="john-sponsor-read__index">Stand by for the next live read</div>
+                </div>
+                <div id="johnSponsorReadNote" class="john-sponsor-read__note">
+                  Type the live sponsor line exactly as shown. Case, punctuation, and spaces all count.
+                </div>
+                <div id="johnSponsorReadPrompt" class="john-sponsor-read__prompt" aria-live="polite">
+                  Sponsor copy loads here when the read goes live.
+                </div>
+                <div class="john-sponsor-read__progress">
+                  <div class="john-sponsor-read__progress-track">
+                    <div id="johnSponsorReadProgressBar" class="john-sponsor-read__progress-bar"></div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="john-sponsor-read__breakdown">
+                <div class="john-sponsor-read__breakdown-stat">
+                  <span>Completion</span>
+                  <strong id="johnSponsorReadCompletion">--</strong>
+                </div>
+                <div class="john-sponsor-read__breakdown-stat">
+                  <span>Read Accuracy</span>
+                  <strong id="johnSponsorReadLiveAccuracy">--</strong>
+                </div>
+                <div class="john-sponsor-read__breakdown-stat">
+                  <span>Projected Score</span>
+                  <strong id="johnSponsorReadProjectedScore">--</strong>
+                </div>
+              </div>
+            </div>
+
+            <div class="john-sponsor-read__timeline">
+              <div class="john-sponsor-read__timeline-meta">
+                <span>Time Left</span>
+                <strong id="johnSponsorReadFooter">--</strong>
+              </div>
+              <div class="john-sponsor-read__timeline-track">
+                <div id="johnSponsorReadTimelineBar" class="john-sponsor-read__timeline-bar"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div id="johnSponsorReadResult" class="forecast-frenzy__result" hidden>
+          <div class="forecast-frenzy__result-card john-sponsor-read__result-card">
+            <div class="forecast-frenzy__result-kicker">Ad Read Report</div>
+            <h2 id="johnSponsorReadResultRank" class="forecast-frenzy__result-rank">Sponsor Favorite</h2>
+            <div id="johnSponsorReadResultSummary" class="forecast-frenzy__result-summary">
+              0% accuracy across 5 reads. Average score 0.
+            </div>
+            <div id="johnSponsorReadResultRows" class="john-sponsor-read__report"></div>
+            <div id="johnSponsorReadResultStats" class="forecast-frenzy__result-stats"></div>
+            <div class="forecast-frenzy__result-buttons">
+              <button id="johnSponsorReadReplayButton" type="button">Replay</button>
+              <button id="johnSponsorReadResultExitButton" type="button">Exit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="producerMan" class="forecast-frenzy producer-man forecast-frenzy--hidden" aria-hidden="true">
+      <div class="forecast-frenzy__intro-overlay"></div>
+      <div class="forecast-frenzy__fade"></div>
+      <div id="producerManStart" class="forecast-frenzy__start" hidden>
+        <div class="forecast-frenzy__start-frame producer-man__start-frame">
+          <div id="producerManStartHost" class="forecast-frenzy__start-kicker">Production Minigame</div>
+          <div class="forecast-frenzy__start-title">Producer-Man</div>
+          <div class="forecast-frenzy__start-copy">
+            Run the studio floor, clear the tasks, and shove the disasters back off air.
+          </div>
+          <div class="forecast-frenzy__start-controls">Click Start or press Enter / Space</div>
+          <button id="producerManStartButton" type="button">Start</button>
+        </div>
+      </div>
+
+      <div class="producer-man__cabinet">
+        <div class="producer-man__marquee">
+          <div class="producer-man__title-group">
+            <div id="producerManHost" class="producer-man__kicker">Production Minigame</div>
+            <strong class="producer-man__title">Producer-Man</strong>
+          </div>
+          <div id="producerManIntroLine" class="producer-man__introline">
+            Run the floor, grab the fixes, and stop the disasters from eating the broadcast.
+          </div>
+          <button id="producerManExitButton" class="producer-man__exit" type="button">Exit</button>
+        </div>
+
+        <div class="producer-man__layout">
+          <aside class="producer-man__sidebar">
+            <div class="producer-man__panel">
+              <div class="producer-man__panel-label">Live Metrics</div>
+              <div class="producer-man__stats">
+                <div class="producer-man__stat">
+                  <span class="producer-man__stat-label">Score</span>
+                  <strong id="producerManScore" class="producer-man__stat-value">0</strong>
+                </div>
+                <div class="producer-man__stat">
+                  <span class="producer-man__stat-label">Lives</span>
+                  <strong id="producerManLives" class="producer-man__stat-value">3</strong>
+                </div>
+                <div class="producer-man__stat">
+                  <span class="producer-man__stat-label">Tasks Left</span>
+                  <strong id="producerManTasks" class="producer-man__stat-value">0</strong>
+                </div>
+                <div class="producer-man__stat">
+                  <span class="producer-man__stat-label">Time</span>
+                  <strong id="producerManTimer" class="producer-man__stat-value">01:35</strong>
+                </div>
+              </div>
+            </div>
+
+            <div class="producer-man__panel">
+              <div class="producer-man__panel-label">Studio Status</div>
+              <div id="producerManStatus" class="producer-man__status-copy">On Air</div>
+              <div id="producerManLegend" class="producer-man__legend"></div>
+            </div>
+
+            <div class="producer-man__panel producer-man__controls">
+              <div class="producer-man__panel-label">Controls</div>
+              <p>Move with <code>WASD</code> or arrow keys.</p>
+              <p>Collect tasks for <strong>+10</strong>.</p>
+              <p>Emergency fixes score <strong>+50</strong> and stun the disasters.</p>
+              <p>Fix chained disasters for escalating combo points.</p>
+            </div>
+          </aside>
+
+          <section class="producer-man__stage">
+            <div class="producer-man__stage-head">
+              <div class="producer-man__live-pill">LIVE FLOOR</div>
+              <div class="producer-man__stage-copy">
+                <strong>Rear hangar studio map</strong>
+                <span>Desk pods, stage, control bays, cameras, and cable lanes all route through one live floor plan.</span>
+              </div>
+              <div id="producerManStatusPill" class="producer-man__status-pill" data-tone="live">Studio Live</div>
+            </div>
+
+            <div class="producer-man__frame">
+              <canvas
+                id="producerManCanvas"
+                class="producer-man__canvas"
+                width="960"
+                height="540"
+                aria-label="Producer-Man rear hangar studio map"
+              ></canvas>
+              <div id="producerManFeedback" class="producer-man__feedback" data-visible="false" data-tone="good"></div>
+            </div>
+
+            <div id="producerManFooter" class="producer-man__footer">
+              Arrow keys or WASD move. Grab emergency fixes before the disasters box you in.
+            </div>
+          </section>
+        </div>
+
+        <div id="producerManResult" class="forecast-frenzy__result" hidden>
+          <div class="forecast-frenzy__result-card producer-man__result-card">
+            <div class="forecast-frenzy__result-kicker">Broadcast Wrapped</div>
+            <h2 id="producerManResultRank" class="forecast-frenzy__result-rank">Associate Producer</h2>
+            <div id="producerManResultSummary" class="forecast-frenzy__result-summary">
+              Studio stabilized.
+            </div>
+            <div id="producerManResultStats" class="forecast-frenzy__result-stats"></div>
+            <div class="forecast-frenzy__result-buttons">
+              <button id="producerManReplayButton" type="button">Replay</button>
+              <button id="producerManResultExitButton" type="button">Exit</button>
             </div>
           </div>
         </div>

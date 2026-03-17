@@ -2,10 +2,12 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { Reflector } from "three/addons/objects/Reflector.js";
+import { JohnSponsorReadOverlay } from "./john-sponsor-read.js";
 import { MaxClipperOverlay } from "./max-clipper.js";
 import { NikChiefOfStaffOverlay } from "./chief-of-staff.js";
 import { ForecastFrenzyGame } from "./forecast-frenzy.js";
 import { JordiSoundboardHeroOverlay } from "./jordi-soundboard-hero.js";
+import { ProducerManOverlay } from "./producer-man.js";
 import { TylerBoardOverlay } from "./tyler-board.js";
 
 const FLOOR_THICKNESS = 0.08;
@@ -448,10 +450,20 @@ const interactionPrompt = document.querySelector("#interactionPrompt");
 const interactionPromptEyebrow = document.querySelector("#interactionPromptEyebrow");
 const interactionPromptTitle = document.querySelector("#interactionPromptTitle");
 const interactionPromptLine = document.querySelector("#interactionPromptLine");
+const walkKeyHud = document.querySelector("#walkKeyHud");
+const walkLogoHud = document.querySelector("#walkLogoHud");
+const walkKeyW = document.querySelector("#walkKeyW");
+const walkKeyA = document.querySelector("#walkKeyA");
+const walkKeyS = document.querySelector("#walkKeyS");
+const walkKeyD = document.querySelector("#walkKeyD");
+const walkKeyShift = document.querySelector("#walkKeyShift");
+const walkKeyJump = document.querySelector("#walkKeyJump");
 const forecastFrenzyRoot = document.querySelector("#forecastFrenzy");
 const tylerBoardRoot = document.querySelector("#tylerBoard");
 const nikChiefOfStaffRoot = document.querySelector("#nikChiefOfStaff");
 const maxClipperRoot = document.querySelector("#maxClipper");
+const johnSponsorReadRoot = document.querySelector("#johnSponsorRead");
+const producerManRoot = document.querySelector("#producerMan");
 const jordiHeroRoot = document.querySelector("#jordiHero");
 const coordX = document.querySelector("#coordX");
 const coordY = document.querySelector("#coordY");
@@ -504,6 +516,7 @@ const cameraForwardVector = new THREE.Vector3();
 const cameraDirectionVector = new THREE.Vector3();
 const lookEuler = new THREE.Euler(0, 0, 0, "YXZ");
 let isPointerLocked = false;
+let walkHudJumpActive = false;
 
 const playerState = {
   position: walkStart.clone(),
@@ -596,6 +609,14 @@ const nikChiefOfStaff = new NikChiefOfStaffOverlay({
 const maxClipper = new MaxClipperOverlay({
   root: maxClipperRoot,
   onExit: handleMaxClipperExit,
+});
+const johnSponsorRead = new JohnSponsorReadOverlay({
+  root: johnSponsorReadRoot,
+  onExit: handleJohnSponsorReadExit,
+});
+const producerMan = new ProducerManOverlay({
+  root: producerManRoot,
+  onExit: handleProducerManExit,
 });
 const jordiHero = new JordiSoundboardHeroOverlay({
   root: jordiHeroRoot,
@@ -1848,6 +1869,39 @@ function registerTylerBoardNpc(character, {
   });
 }
 
+function registerJohnSponsorNpc(character, {
+  promptEyebrow = "John",
+  promptTitle = "Press E to read sponsors",
+  lines = [
+    "Five sponsor reads. Type them clean before the timer expires.",
+    "Gemini, Shopify, Restream, Phantom. The sponsor stack changes every run.",
+    "Accuracy times speed. Every typo shows up immediately.",
+  ],
+  promptRadius = 1.8,
+} = {}) {
+  if (!character) {
+    return;
+  }
+
+  interactiveNpcs.push({
+    type: "johnSponsorRead",
+    promptEyebrow,
+    promptTitle,
+    lines,
+    promptRadius,
+    avatar: character,
+    interactionPoint: character.interactionPoint,
+    promptAnchor: character.head,
+    promptOffsetY: 0.42,
+    baseRootY: character.root.position.y,
+    baseHeadRotationX: character.head.rotation.x,
+    baseHeadRotationY: character.head.rotation.y,
+    baseLeftArmX: character.leftArmPivot.rotation.x,
+    baseRightArmX: character.rightArmPivot.rotation.x,
+    phaseOffset: Math.random() * Math.PI * 2,
+  });
+}
+
 function registerNikChiefOfStaffNpc(character, {
   promptEyebrow = "Nik",
   promptTitle = "Press E to staff the calendar",
@@ -1897,6 +1951,39 @@ function registerMaxClipperNpc(character, {
 
   interactiveNpcs.push({
     type: "maxClipper",
+    promptEyebrow,
+    promptTitle,
+    lines,
+    promptRadius,
+    avatar: character,
+    interactionPoint: character.interactionPoint,
+    promptAnchor: character.head,
+    promptOffsetY: 0.42,
+    baseRootY: character.root.position.y,
+    baseHeadRotationX: character.head.rotation.x,
+    baseHeadRotationY: character.head.rotation.y,
+    baseLeftArmX: character.leftArmPivot.rotation.x,
+    baseRightArmX: character.rightArmPivot.rotation.x,
+    phaseOffset: Math.random() * Math.PI * 2,
+  });
+}
+
+function registerProducerManNpc(character, {
+  promptEyebrow = "Production",
+  promptTitle = "Press E to produce",
+  lines = [
+    "The floor is melting down. Keep the stream alive.",
+    "Clear the fixes before the disasters corner you.",
+    "This is Pac-Man if Pac-Man had to run a live show.",
+  ],
+  promptRadius = 1.8,
+} = {}) {
+  if (!character) {
+    return;
+  }
+
+  interactiveNpcs.push({
+    type: "producerMan",
     promptEyebrow,
     promptTitle,
     lines,
@@ -7038,7 +7125,15 @@ function addP3aStorageShelf() {
     shirtColor: "#f3efe6",
   });
   if (scott) {
-    registerChatNpc(scott, { promptEyebrow: "Scott", promptTitle: "Press E to talk" });
+    registerProducerManNpc(scott, {
+      promptEyebrow: "Scott",
+      promptTitle: "Press E to produce",
+      lines: [
+        "Mic checks, framing, WiFi, all of it is on fire.",
+        "Run the floor and keep the episode on the rails.",
+        "Producer-Man is the job description.",
+      ],
+    });
   }
   const hangarCenterDeskCenter = [5.19, 17.8];
   addDoubleLayerDesk(hangarCenterDeskCenter, Math.PI * 1.5, 2.2);
@@ -7725,9 +7820,14 @@ function addP3aStorageShelf() {
             promptTitle: "Press E to jam",
           });
         } else {
-          registerChatNpc(seated, {
+          registerJohnSponsorNpc(seated, {
             promptEyebrow: "John",
-            promptTitle: "Press E to talk",
+            promptTitle: "Press E to read sponsors",
+            lines: [
+              "Five sponsor reads. Type them before the timer expires.",
+              "Gemini, Shopify, MongoDB, Figma, Kalshi. The deck changes every run.",
+              "Accuracy times speed. Keep the sponsors happy.",
+            ],
           });
         }
       }
@@ -7813,7 +7913,15 @@ function addP3aStorageShelf() {
     shirtColor: "#f3efe6",
   });
   if (ben) {
-    registerChatNpc(ben, { promptEyebrow: "Ben", promptTitle: "Press E to talk" });
+    registerProducerManNpc(ben, {
+      promptEyebrow: "Ben",
+      promptTitle: "Press E to produce",
+      lines: [
+        "The studio is chaos. Go save the segment.",
+        "Clear every production task before the problems swarm you.",
+        "You are now Producer-Man.",
+      ],
+    });
   }
   addWestSideStandingTv([2.53, 15.77], westSideTableRotation);
   addStandingTable(eastSideTableCenter, eastSideTableRotation, 1.85);
@@ -7834,7 +7942,15 @@ function addP3aStorageShelf() {
     shirtColor: "#f3efe6",
   });
   if (michael) {
-    registerChatNpc(michael, { promptEyebrow: "Michael", promptTitle: "Press E to talk" });
+    registerProducerManNpc(michael, {
+      promptEyebrow: "Michael",
+      promptTitle: "Press E to produce",
+      lines: [
+        "The control room is good until it absolutely is not.",
+        "Reset the disasters and stabilize the episode.",
+        "Get the stream home without crashing it.",
+      ],
+    });
   }
 
   const wardrobeWidth = 2.68;
@@ -12847,6 +12963,47 @@ function handleMaxClipperExit() {
   syncUi();
 }
 
+function startJohnSponsorRead(npc) {
+  clearMovementState();
+  state.seatedSeat = null;
+  playerState.motion = 0;
+  state.mode = "minigame";
+  unlockPointer();
+  hideInteractionPrompt();
+  const line =
+    npc.lines[Math.floor(Math.random() * npc.lines.length)] ??
+    "Five sponsor reads. Accuracy times speed. Keep the copy clean.";
+  johnSponsorRead.start({ introLine: line });
+  syncUi();
+}
+
+function handleJohnSponsorReadExit() {
+  state.mode = "walk";
+  syncUi();
+}
+
+function startProducerMan(npc) {
+  clearMovementState();
+  state.seatedSeat = null;
+  playerState.motion = 0;
+  state.mode = "minigame";
+  unlockPointer();
+  hideInteractionPrompt();
+  const line =
+    npc.lines[Math.floor(Math.random() * npc.lines.length)] ??
+    "Run the floor, grab the fixes, and stop the disasters from eating the broadcast.";
+  producerMan.start({
+    hostName: npc.promptEyebrow ?? "Production",
+    introLine: line,
+  });
+  syncUi();
+}
+
+function handleProducerManExit() {
+  state.mode = "walk";
+  syncUi();
+}
+
 function startJordiHero(npc) {
   clearMovementState();
   state.seatedSeat = null;
@@ -12992,6 +13149,14 @@ function toggleNearestInteraction() {
     }
     if (npc.type === "maxClipper") {
       startMaxClipper(npc);
+      return;
+    }
+    if (npc.type === "johnSponsorRead") {
+      startJohnSponsorRead(npc);
+      return;
+    }
+    if (npc.type === "producerMan") {
+      startProducerMan(npc);
       return;
     }
     if (npc.type === "jordiHero") {
@@ -14287,6 +14452,8 @@ function animate() {
   tylerBoard.update(delta, elapsedTime);
   nikChiefOfStaff.update(delta, elapsedTime);
   maxClipper.update(delta, elapsedTime);
+  johnSponsorRead.update(delta, elapsedTime);
+  producerMan.update(delta, elapsedTime);
   jordiHero.update(delta, elapsedTime);
   mirrorDistanceLods.forEach(({ reflective, fallback, threshold }) => {
     const worldPosition = new THREE.Vector3();
@@ -14496,9 +14663,31 @@ function updateCoordinateDisplay() {
 
 function syncUi() {
   labelGroup.visible = state.mode === "overview";
+  if (walkKeyHud) {
+    const visible = state.mode === "walk";
+    walkKeyHud.setAttribute("aria-hidden", visible ? "false" : "true");
+  }
+  if (walkLogoHud) {
+    const visible = state.mode === "walk";
+    walkLogoHud.setAttribute("aria-hidden", visible ? "false" : "true");
+  }
+  syncWalkKeyHud();
   if (state.mode !== "walk") {
     hideInteractionPrompt();
   }
+}
+
+function syncWalkKeyHud() {
+  if (!walkKeyW || !walkKeyA || !walkKeyS || !walkKeyD || !walkKeyShift || !walkKeyJump) {
+    return;
+  }
+
+  walkKeyW.dataset.active = state.mode === "walk" && state.moveForward ? "true" : "false";
+  walkKeyA.dataset.active = state.mode === "walk" && state.moveLeft ? "true" : "false";
+  walkKeyS.dataset.active = state.mode === "walk" && state.moveBackward ? "true" : "false";
+  walkKeyD.dataset.active = state.mode === "walk" && state.moveRight ? "true" : "false";
+  walkKeyShift.dataset.active = state.mode === "walk" && state.sprint ? "true" : "false";
+  walkKeyJump.dataset.active = state.mode === "walk" && walkHudJumpActive ? "true" : "false";
 }
 
 function onResize() {
@@ -14552,6 +14741,12 @@ function onKeyDown(event) {
     if (maxClipper.handleKeyDown(event)) {
       return;
     }
+    if (johnSponsorRead.handleKeyDown(event)) {
+      return;
+    }
+    if (producerMan.handleKeyDown(event)) {
+      return;
+    }
     jordiHero.handleKeyDown(event);
     return;
   }
@@ -14560,32 +14755,39 @@ function onKeyDown(event) {
     case "KeyW":
       if (state.mode === "walk" && isPointerLocked) {
         state.moveForward = true;
+        syncWalkKeyHud();
       }
       break;
     case "KeyS":
       if (state.mode === "walk" && isPointerLocked) {
         state.moveBackward = true;
+        syncWalkKeyHud();
       }
       break;
     case "KeyA":
       if (state.mode === "walk" && isPointerLocked) {
         state.moveLeft = true;
+        syncWalkKeyHud();
       }
       break;
     case "KeyD":
       if (state.mode === "walk" && isPointerLocked) {
         state.moveRight = true;
+        syncWalkKeyHud();
       }
       break;
     case "ShiftLeft":
     case "ShiftRight":
       if (state.mode === "walk" && isPointerLocked) {
         state.sprint = true;
+        syncWalkKeyHud();
       }
       break;
     case "Space":
       if (state.mode === "walk" && isPointerLocked) {
         event.preventDefault();
+        walkHudJumpActive = true;
+        syncWalkKeyHud();
         if (playerState.position.y <= PLAYER_HEIGHT + 0.01) {
           state.velocityY = JUMP_VELOCITY;
         }
@@ -14628,19 +14830,28 @@ function onKeyUp(event) {
   switch (event.code) {
     case "KeyW":
       state.moveForward = false;
+      syncWalkKeyHud();
       break;
     case "KeyS":
       state.moveBackward = false;
+      syncWalkKeyHud();
       break;
     case "KeyA":
       state.moveLeft = false;
+      syncWalkKeyHud();
       break;
     case "KeyD":
       state.moveRight = false;
+      syncWalkKeyHud();
       break;
     case "ShiftLeft":
     case "ShiftRight":
       state.sprint = false;
+      syncWalkKeyHud();
+      break;
+    case "Space":
+      walkHudJumpActive = false;
+      syncWalkKeyHud();
       break;
     default:
       break;

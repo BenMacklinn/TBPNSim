@@ -4,7 +4,9 @@ const PREVIEW_ACTIVE_LIMIT = 3;
 const MAX_ENGAGEMENT = 100;
 const RESOLVE_DURATION = 0.42;
 const FEEDBACK_DURATION = 0.9;
-const READY_FADE_DURATION = 0.55;
+const INTRO_FADE_OUT = 1.8;
+const INTRO_HOLD = 0.5;
+const INTRO_FADE_IN = 1.8;
 
 const SLOT_BINDINGS = Array.from({ length: 9 }, (_, index) => ({
   index,
@@ -122,6 +124,10 @@ function clamp(value, min, max) {
 
 function lerp(start, end, amount) {
   return start + (end - start) * amount;
+}
+
+function easeOutCubic(value) {
+  return 1 - (1 - value) ** 3;
 }
 
 function padNumber(value) {
@@ -278,13 +284,15 @@ export class MaxClipperOverlay {
     this.slotViews = [];
     this.active = false;
     this.phase = "hidden";
+    this.phaseTime = 0;
     this.elapsed = 0;
     this.feedback = { text: "", tone: "neutral", remaining: 0 };
     this.introLine = "Whack the postable moments before they duck back under.";
     this.resultData = null;
     this.stats = this.createEmptyStats();
-    this.introOverlayAlpha = 1;
-    this.readyElapsed = 0;
+    this.fadeAlpha = 0;
+    this.introOverlayAlpha = 0;
+    this.cabinetVisible = false;
 
     this.startButton?.addEventListener("click", () => this.beginRun());
     this.exitButton?.addEventListener("click", () => this.exit("exit"));
@@ -368,9 +376,10 @@ export class MaxClipperOverlay {
     this.feedback = { text: "", tone: "neutral", remaining: 0 };
     this.resultData = null;
     this.stats = this.createEmptyStats();
-    this.readyElapsed = 0;
-    this.introOverlayAlpha = 1;
+    this.phaseTime = 0;
+    this.introOverlayAlpha = 0;
     this.phase = "ready";
+    this.cabinetVisible = true;
 
     this.slotViews.forEach((slot) => {
       slot.opportunity = null;
@@ -386,6 +395,10 @@ export class MaxClipperOverlay {
     this.root.setAttribute("aria-hidden", "false");
     this.resultElement.hidden = true;
     this.prepareReadyState();
+    this.phase = "intro";
+    this.phaseTime = 0;
+    this.introOverlayAlpha = 0;
+    this.cabinetVisible = false;
     this.sync();
   }
 
@@ -396,6 +409,7 @@ export class MaxClipperOverlay {
 
     this.audio.playStart();
     this.resetRun();
+    this.cabinetVisible = true;
     this.sync();
   }
 
@@ -406,6 +420,7 @@ export class MaxClipperOverlay {
 
     this.active = false;
     this.phase = "hidden";
+    this.cabinetVisible = false;
     this.root.classList.add("forecast-frenzy--hidden");
     this.root.setAttribute("aria-hidden", "true");
     this.resultElement.hidden = true;
@@ -709,7 +724,7 @@ export class MaxClipperOverlay {
   }
 
   sync() {
-    this.root.dataset.visible = this.active ? "true" : "false";
+    this.root.dataset.visible = this.cabinetVisible ? "true" : "false";
 
     if (this.introLineElement) {
       this.introLineElement.textContent = this.introLine;
@@ -733,7 +748,9 @@ export class MaxClipperOverlay {
       this.engagementFillElement.style.width = `${this.stats.engagement}%`;
     }
     if (this.footerElement) {
-      if (this.phase === "ready") {
+      if (this.phase === "intro") {
+        this.footerElement.textContent = "Stand by.";
+      } else if (this.phase === "ready") {
         this.footerElement.textContent = "Let the fade land, then click Start when you're ready.";
       } else if (this.phase === "result") {
         this.footerElement.textContent = "Press Enter, Space, or R to run it back. Escape exits.";
@@ -743,10 +760,17 @@ export class MaxClipperOverlay {
     }
     if (this.statusPillElement) {
       this.statusPillElement.textContent =
-        this.phase === "ready" ? "Stand By" : this.phase === "result" ? "Session Over" : "Live Feed";
+        this.phase === "intro"
+          ? "Loading"
+          : this.phase === "ready"
+            ? "Stand By"
+            : this.phase === "result"
+              ? "Session Over"
+              : "Live Feed";
       this.statusPillElement.dataset.tone =
-        this.phase === "ready" ? "result" : this.phase === "result" ? "result" : "live";
+        this.phase === "intro" || this.phase === "ready" || this.phase === "result" ? "result" : "live";
     }
+    this.root.style.setProperty("--forecast-fade", this.fadeAlpha.toFixed(3));
     this.root.style.setProperty("--forecast-intro-overlay", this.introOverlayAlpha.toFixed(3));
     if (this.startOverlayElement) {
       const visible = this.phase === "ready";
@@ -789,6 +813,10 @@ export class MaxClipperOverlay {
       return false;
     }
 
+    if (this.phase === "intro") {
+      return false;
+    }
+
     const slotIndex = KEY_TO_SLOT[event.code];
     if (slotIndex == null) {
       return false;
@@ -804,9 +832,27 @@ export class MaxClipperOverlay {
       return;
     }
 
-    if (this.phase === "ready") {
-      this.readyElapsed += delta;
-      this.introOverlayAlpha = clamp(1 - this.readyElapsed / READY_FADE_DURATION, 0, 1);
+    if (this.phase === "intro") {
+      this.phaseTime += delta;
+      const totalIntro = INTRO_FADE_OUT + INTRO_HOLD + INTRO_FADE_IN;
+
+      if (this.phaseTime >= totalIntro) {
+        this.prepareReadyState();
+        this.sync();
+        return;
+      }
+
+      if (this.phaseTime < INTRO_FADE_OUT) {
+        this.introOverlayAlpha = easeOutCubic(clamp(this.phaseTime / INTRO_FADE_OUT, 0, 1));
+      } else if (this.phaseTime < INTRO_FADE_OUT + INTRO_HOLD) {
+        this.introOverlayAlpha = 1;
+        this.cabinetVisible = true;
+      } else {
+        const fadeInProgress = (this.phaseTime - INTRO_FADE_OUT - INTRO_HOLD) / INTRO_FADE_IN;
+        this.introOverlayAlpha = 1 - easeOutCubic(clamp(fadeInProgress, 0, 1));
+        this.cabinetVisible = true;
+      }
+
       this.sync();
       return;
     }
