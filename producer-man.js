@@ -3,6 +3,9 @@ const PROMPT_LEAD = 0.82;
 const GOOD_EARLY_WINDOW = 0.56;
 const PERFECT_WINDOW = 0.18;
 const LATE_WINDOW = 0.84;
+const INTRO_FADE_OUT = 0.22;
+const INTRO_HOLD = 0.12;
+const INTRO_FADE_IN = 0.34;
 const PERFECT_SCORE = 150;
 const GOOD_SCORE = 110;
 const LATE_SCORE = 70;
@@ -79,6 +82,10 @@ const SESSION_LENGTH = Number((EVENT_SCRIPT[EVENT_SCRIPT.length - 1].cue + 2.8).
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function easeOutCubic(value) {
+  return 1 - Math.pow(1 - value, 3);
 }
 
 function padNumber(value) {
@@ -238,6 +245,9 @@ export class ProducerManOverlay {
     this.audio = new ProducerManAudio();
     this.shots = shotCatalog.map((shot) => ({ ...shot }));
     this.defaultShotId = this.shots.find((shot) => shot.id === "wide")?.id ?? this.shots[0]?.id ?? null;
+    this.phaseTime = 0;
+    this.fadeAlpha = 0;
+    this.introOverlayAlpha = 0;
 
     this.hostElement = root.querySelector("#producerManHost");
     this.startHostElement = root.querySelector("#producerManStartHost");
@@ -402,7 +412,10 @@ export class ProducerManOverlay {
     this.hostName = hostName;
     this.introLine = introLine;
     this.active = true;
-    this.phase = "ready";
+    this.phase = "intro";
+    this.phaseTime = 0;
+    this.fadeAlpha = 0;
+    this.introOverlayAlpha = 0;
     this.root.classList.remove("forecast-frenzy--hidden");
     this.root.setAttribute("aria-hidden", "false");
     this.root.dataset.visible = "true";
@@ -669,11 +682,18 @@ export class ProducerManOverlay {
       return;
     }
 
-    this.root.style.setProperty(
-      "--forecast-fade",
-      this.phase === "result" ? "0.28" : this.phase === "playing" ? "0.14" : "0.18",
-    );
-    this.root.style.setProperty("--forecast-intro-overlay", "0");
+    const fadeValue =
+      this.phase === "result"
+        ? 0.28
+        : this.phase === "playing"
+          ? 0.14
+          : this.phase === "intro"
+            ? this.fadeAlpha
+            : 0.18;
+    this.root.style.setProperty("--forecast-fade", fadeValue.toFixed(3));
+    this.root.style.setProperty("--forecast-intro-overlay", this.introOverlayAlpha.toFixed(3));
+    this.root.style.setProperty("--forecast-flash-opacity", "0");
+    this.root.style.setProperty("--forecast-flash-color", "255,255,255");
 
     const activeEvent = this.phase === "playing" ? this.getActiveEvent() : null;
     const selectedShot = this.getShotById(this.selectedShotId);
@@ -865,6 +885,33 @@ export class ProducerManOverlay {
 
   update(delta) {
     if (!this.active) {
+      return;
+    }
+
+    if (this.phase === "intro") {
+      this.phaseTime += delta;
+      const totalIntro = INTRO_FADE_OUT + INTRO_HOLD + INTRO_FADE_IN;
+
+      if (this.phaseTime >= totalIntro) {
+        this.phase = "ready";
+        this.phaseTime = 0;
+        this.fadeAlpha = 0.18;
+        this.introOverlayAlpha = 0;
+        this.sync();
+        return;
+      }
+
+      if (this.phaseTime < INTRO_FADE_OUT) {
+        this.introOverlayAlpha = easeOutCubic(clamp(this.phaseTime / INTRO_FADE_OUT, 0, 1));
+      } else if (this.phaseTime < INTRO_FADE_OUT + INTRO_HOLD) {
+        this.introOverlayAlpha = 1;
+      } else {
+        const fadeInProgress = (this.phaseTime - INTRO_FADE_OUT - INTRO_HOLD) / INTRO_FADE_IN;
+        this.introOverlayAlpha = 1 - easeOutCubic(clamp(fadeInProgress, 0, 1));
+      }
+
+      this.fadeAlpha = 1;
+      this.sync();
       return;
     }
 

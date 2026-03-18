@@ -14,6 +14,9 @@ const DROP_SPEED = 1800;
 const BASE_MOVE_SPEED = 280;
 const MOVE_SPEED_STEP = 26;
 const TRAVEL_MARGIN = 250;
+const INTRO_FADE_OUT = 0.22;
+const INTRO_HOLD = 0.12;
+const INTRO_FADE_IN = 0.34;
 const PERFECT_ALIGNMENT = 0.972;
 const GREAT_ALIGNMENT = 0.9;
 const GOOD_ALIGNMENT = 0.75;
@@ -29,6 +32,10 @@ const SCREENSHOT_PATHS = [
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function easeOutCubic(value) {
+  return 1 - Math.pow(1 - value, 3);
 }
 
 function drawRoundedRectPath(context, x, y, width, height, radius) {
@@ -271,6 +278,9 @@ export class BrandonStackOverlay {
     this.alignmentHistory = [];
     this.flash = 0;
     this.flashColor = "#54d5a2";
+    this.fadeAlpha = 0;
+    this.introOverlayAlpha = 0;
+    this.phaseTime = 0;
     this.feedback = { text: "", tone: "neutral", remaining: 0 };
     this.currentSlice = null;
     this.stack = [];
@@ -486,7 +496,10 @@ export class BrandonStackOverlay {
     this.audio.ensureContext();
     this.introLine = introLine;
     this.active = true;
-    this.phase = "ready";
+    this.phase = "intro";
+    this.phaseTime = 0;
+    this.fadeAlpha = 0;
+    this.introOverlayAlpha = 0;
     this.root.classList.remove("forecast-frenzy--hidden");
     this.root.setAttribute("aria-hidden", "false");
     this.root.dataset.visible = "true";
@@ -769,6 +782,35 @@ export class BrandonStackOverlay {
       return;
     }
 
+    if (this.phase === "intro") {
+      this.phaseTime += delta;
+      const totalIntro = INTRO_FADE_OUT + INTRO_HOLD + INTRO_FADE_IN;
+
+      if (this.phaseTime >= totalIntro) {
+        this.phase = "ready";
+        this.phaseTime = 0;
+        this.fadeAlpha = 0.18;
+        this.introOverlayAlpha = 0;
+        this.sync();
+        this.draw();
+        return;
+      }
+
+      if (this.phaseTime < INTRO_FADE_OUT) {
+        this.introOverlayAlpha = easeOutCubic(clamp(this.phaseTime / INTRO_FADE_OUT, 0, 1));
+      } else if (this.phaseTime < INTRO_FADE_OUT + INTRO_HOLD) {
+        this.introOverlayAlpha = 1;
+      } else {
+        const fadeInProgress = (this.phaseTime - INTRO_FADE_OUT - INTRO_HOLD) / INTRO_FADE_IN;
+        this.introOverlayAlpha = 1 - easeOutCubic(clamp(fadeInProgress, 0, 1));
+      }
+
+      this.fadeAlpha = 1;
+      this.sync();
+      this.draw();
+      return;
+    }
+
     this.flash = Math.max(0, this.flash - delta * 1.9);
     this.feedback.remaining = Math.max(0, this.feedback.remaining - delta);
     this.stack.forEach((piece) => {
@@ -869,6 +911,14 @@ export class BrandonStackOverlay {
   }
 
   sync() {
+    this.root.style.setProperty(
+      "--forecast-fade",
+      (this.phase === "result" ? 0.28 : this.phase === "playing" ? 0.14 : this.phase === "intro" ? this.fadeAlpha : 0.18).toFixed(3),
+    );
+    this.root.style.setProperty("--forecast-intro-overlay", this.introOverlayAlpha.toFixed(3));
+    this.root.style.setProperty("--forecast-flash-opacity", "0");
+    this.root.style.setProperty("--forecast-flash-color", "255,255,255");
+
     if (this.introLineElement) {
       this.introLineElement.textContent = this.introLine;
     }

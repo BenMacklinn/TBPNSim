@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { Reflector } from "three/addons/objects/Reflector.js";
+import { createClient } from "@supabase/supabase-js";
 import { JohnSponsorReadOverlay } from "./john-sponsor-read.js";
 import { MaxClipperOverlay } from "./max-clipper.js";
 import { NikChiefOfStaffOverlay } from "./chief-of-staff.js";
@@ -30,6 +31,8 @@ const HANGAR_GREENSCREEN_RIB_CLEARANCE = HANGAR_RIB_WIDTH * 0.9;
 const HANGAR_DUCT_RADIUS = 0.28;
 const DEFAULT_LIGHTING_LAYER = 0;
 const HANGAR_LIGHTING_LAYER = 1;
+const SUPABASE_URL = "https://tmutzmsabelfmnexlxzn.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtdXR6bXNhYmVsZm1uZXhseHpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4NTM0MDgsImV4cCI6MjA4OTQyOTQwOH0.BXpjJzCsrJognU7DynKU29pJsDAsDTgvE6im-20LJ0w";
 const PLAYER_HEIGHT = 1.8;
 const PLAYER_RADIUS = 0.24;
 const POINTER_LOOK_SENSITIVITY = 0.0022;
@@ -486,15 +489,43 @@ const producerManRoot = document.querySelector("#producerMan");
 const jordiHeroRoot = document.querySelector("#jordiHero");
 const brandonStackRoot = document.querySelector("#brandonStack");
 const subscribersHud = document.querySelector("#subscribersHud");
+const subscribersHudPlayer = document.querySelector("#subscribersHudPlayer");
+const subscribersHudRank = document.querySelector("#subscribersHudRank");
 const subscribersHudCount = document.querySelector("#subscribersHudCount");
 const subscribersHudDelta = document.querySelector("#subscribersHudDelta");
+const leaderboardList = document.querySelector("#leaderboardList");
+const leaderboardEmpty = document.querySelector("#leaderboardEmpty");
+const leaderboardMeta = document.querySelector("#leaderboardMeta");
+const authSignOutButton = document.querySelector("#authSignOutButton");
+const sessionGate = document.querySelector("#sessionGate");
+const sessionGateForm = document.querySelector("#sessionGateForm");
+const sessionGateTitle = document.querySelector("#sessionGateTitle");
+const sessionGateCopy = document.querySelector("#sessionGateCopy");
+const sessionGateLoginModeButton = document.querySelector("#sessionGateLoginMode");
+const sessionGateSignupModeButton = document.querySelector("#sessionGateSignupMode");
+const sessionGateEmailInput = document.querySelector("#sessionGateEmail");
+const sessionGateNameField = document.querySelector("#sessionGateNameField");
+const sessionGateNameInput = document.querySelector("#sessionGateName");
+const sessionGatePasswordInput = document.querySelector("#sessionGatePassword");
+const sessionGateLastPlayer = document.querySelector("#sessionGateLastPlayer");
+const sessionGateError = document.querySelector("#sessionGateError");
+const sessionGateSubmitButton = document.querySelector("#sessionGateSubmit");
 const SUBSCRIBERS_START = 50000;
 const SUBSCRIBERS_SWING = 1000;
 const SUBSCRIBERS_STEP = 50;
 const SUBSCRIBERS_GAIN_THRESHOLD = 0.62;
+const SUBSCRIBER_EMAIL_LIMIT = 120;
+const SUBSCRIBER_NAME_LIMIT = 24;
+const LEADERBOARD_LIMIT = 20;
 let subscriberCount = SUBSCRIBERS_START;
 let lastSubscriberDelta = 0;
 let hasSubscriberOutcome = false;
+let activeSubscriberProfileKey = "";
+let activeSubscriberEmail = "";
+let activeSubscriberName = "";
+let leaderboardEntries = [];
+let authMode = "login";
+let isAuthBusy = false;
 const PRODUCER_MAN_CAMERA_SHOTS = {
   host: {
     positionPlan: [9.4, 25.0],
@@ -565,6 +596,14 @@ const PRODUCER_MAN_CAMERA_SHOTS = {
     },
   },
 };
+
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+});
 
 const renderer = new THREE.WebGLRenderer({
   antialias: true,
@@ -689,12 +728,6 @@ function toggleBgMusicMute() {
   if (!bgMusic) return;
   bgMusicMuted = !bgMusicMuted;
   bgMusic.muted = bgMusicMuted;
-  const btn = document.querySelector("#muteButton");
-  if (btn) {
-    btn.textContent = bgMusicMuted ? "🔇" : "🔊";
-    btn.title = bgMusicMuted ? "Unmute music (M)" : "Mute music (M)";
-    btn.setAttribute("aria-label", bgMusicMuted ? "Unmute background music (M)" : "Mute background music (M)");
-  }
 }
 
 function playFootstep() {
@@ -751,13 +784,266 @@ function formatSignedSubscriberCount(value) {
   return `${rounded > 0 ? "+" : "-"}${Math.abs(rounded).toLocaleString()}`;
 }
 
+function sanitizeSubscriberName(name) {
+  return String(name ?? "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, SUBSCRIBER_NAME_LIMIT);
+}
+
+function sanitizeSubscriberEmail(email) {
+  return String(email ?? "")
+    .trim()
+    .toLowerCase()
+    .slice(0, SUBSCRIBER_EMAIL_LIMIT);
+}
+
+function isValidSubscriberEmail(email) {
+  const normalizedEmail = sanitizeSubscriberEmail(email);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
+}
+
+function getSubscriberDisplayNameFromEmail(email) {
+  const localPart = sanitizeSubscriberEmail(email).split("@")[0] ?? "";
+  const cleaned = localPart.replace(/[._-]+/g, " ");
+  const titled = cleaned
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+  return sanitizeSubscriberName(titled || localPart);
+}
+
+function normalizeSubscriberProfile(profile) {
+  return {
+    id: profile?.id ?? "",
+    email: sanitizeSubscriberEmail(profile?.email ?? ""),
+    display_name:
+      sanitizeSubscriberName(profile?.display_name) ||
+      sanitizeSubscriberName(profile?.name) ||
+      getSubscriberDisplayNameFromEmail(profile?.email ?? "") ||
+      "Player",
+    subscriber_count: Number.isFinite(profile?.subscriber_count)
+      ? Math.max(0, Math.round(profile.subscriber_count))
+      : SUBSCRIBERS_START,
+    last_subscriber_delta: Number.isFinite(profile?.last_subscriber_delta) ? Math.round(profile.last_subscriber_delta) : 0,
+    has_subscriber_outcome: Boolean(profile?.has_subscriber_outcome),
+    updated_at: typeof profile?.updated_at === "string" ? profile.updated_at : new Date(0).toISOString(),
+  };
+}
+
+function clearActiveSubscriberProfile() {
+  activeSubscriberProfileKey = "";
+  activeSubscriberEmail = "";
+  activeSubscriberName = "";
+  subscriberCount = SUBSCRIBERS_START;
+  lastSubscriberDelta = 0;
+  hasSubscriberOutcome = false;
+}
+
+function setSessionGateMessage(message = "") {
+  if (sessionGateError) {
+    sessionGateError.textContent = message;
+  }
+}
+
+function setSessionGateBusy(isBusyNow) {
+  isAuthBusy = isBusyNow;
+  if (sessionGateEmailInput) {
+    sessionGateEmailInput.disabled = isBusyNow;
+  }
+  if (sessionGateNameInput) {
+    sessionGateNameInput.disabled = isBusyNow;
+  }
+  if (sessionGatePasswordInput) {
+    sessionGatePasswordInput.disabled = isBusyNow;
+  }
+  if (sessionGateSubmitButton) {
+    sessionGateSubmitButton.disabled = isBusyNow;
+  }
+  if (sessionGateLoginModeButton) {
+    sessionGateLoginModeButton.disabled = isBusyNow;
+  }
+  if (sessionGateSignupModeButton) {
+    sessionGateSignupModeButton.disabled = isBusyNow;
+  }
+  if (authSignOutButton) {
+    authSignOutButton.disabled = isBusyNow;
+  }
+}
+
+function setAuthMode(mode) {
+  authMode = mode === "signup" ? "signup" : "login";
+
+  if (sessionGateLoginModeButton) {
+    sessionGateLoginModeButton.dataset.active = authMode === "login" ? "true" : "false";
+  }
+  if (sessionGateSignupModeButton) {
+    sessionGateSignupModeButton.dataset.active = authMode === "signup" ? "true" : "false";
+  }
+  if (sessionGateTitle) {
+    sessionGateTitle.textContent =
+      authMode === "signup" ? "Create your TBPN account." : "Log in to your TBPN account.";
+  }
+  if (sessionGateCopy) {
+    sessionGateCopy.textContent =
+      authMode === "signup"
+        ? "Create one account and your subscriber total will follow you across sessions."
+        : "Your subscriber total and leaderboard spot are tied to your authenticated account.";
+  }
+  if (sessionGateNameField) {
+    const showNameField = authMode === "signup";
+    sessionGateNameField.hidden = !showNameField;
+    sessionGateNameField.classList.toggle("session-gate__field--hidden", !showNameField);
+  }
+  if (sessionGateNameInput) {
+    sessionGateNameInput.required = authMode === "signup";
+    if (authMode === "login") {
+      sessionGateNameInput.value = "";
+    }
+  }
+  if (sessionGatePasswordInput) {
+    sessionGatePasswordInput.autocomplete = authMode === "signup" ? "new-password" : "current-password";
+  }
+  if (sessionGateSubmitButton) {
+    sessionGateSubmitButton.textContent = authMode === "signup" ? "Create Account" : "Log In";
+  }
+  if (sessionGateLastPlayer) {
+    sessionGateLastPlayer.textContent =
+      authMode === "signup"
+        ? "Use a real email and password. New accounts should enter the game immediately after signup."
+        : "Use your existing TBPN account to load your saved subscriber total.";
+  }
+  setSessionGateMessage("");
+}
+
+function isSessionGateOpen() {
+  return Boolean(sessionGate && !sessionGate.hidden);
+}
+
+function isSubscriberSessionReady() {
+  return Boolean(activeSubscriberProfileKey);
+}
+
+function openSessionGate() {
+  if (!sessionGate) {
+    return;
+  }
+
+  unlockPointer();
+  clearMovementState();
+  sessionGate.hidden = false;
+  sessionGate.setAttribute("aria-hidden", "false");
+  syncUi();
+
+  if (sessionGateEmailInput) {
+    requestAnimationFrame(() => {
+      sessionGateEmailInput.focus();
+      sessionGateEmailInput.select();
+    });
+  }
+}
+
+function closeSessionGate() {
+  if (!sessionGate) {
+    return;
+  }
+
+  sessionGate.hidden = true;
+  sessionGate.setAttribute("aria-hidden", "true");
+  setSessionGateMessage("");
+  syncUi();
+}
+
+async function fetchLeaderboard() {
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, email, display_name, subscriber_count, updated_at")
+    .order("subscriber_count", { ascending: false })
+    .order("updated_at", { ascending: false })
+    .limit(LEADERBOARD_LIMIT);
+
+  if (error) {
+    throw error;
+  }
+
+  leaderboardEntries = (data ?? []).map((profile) => normalizeSubscriberProfile(profile));
+}
+
+function renderLeaderboard() {
+  if (!leaderboardList) {
+    return;
+  }
+
+  if (leaderboardMeta) {
+    leaderboardMeta.textContent = `${leaderboardEntries.length} player${leaderboardEntries.length === 1 ? "" : "s"}`;
+  }
+  if (leaderboardEmpty) {
+    leaderboardEmpty.hidden = leaderboardEntries.length > 0;
+  }
+
+  const rows = leaderboardEntries.map((entry, index) => {
+    const item = document.createElement("li");
+    item.className = "leaderboard-panel__entry";
+    item.dataset.active = entry.id === activeSubscriberProfileKey ? "true" : "false";
+
+    const rank = document.createElement("span");
+    rank.className = "leaderboard-panel__rank";
+    rank.textContent = `#${index + 1}`;
+
+    const player = document.createElement("div");
+    player.className = "leaderboard-panel__player";
+
+    const nameRow = document.createElement("div");
+    nameRow.className = "leaderboard-panel__name-row";
+
+    const name = document.createElement("strong");
+    name.className = "leaderboard-panel__name";
+    name.textContent = entry.display_name;
+    nameRow.append(name);
+
+    if (entry.id === activeSubscriberProfileKey) {
+      const badge = document.createElement("span");
+      badge.className = "leaderboard-panel__badge";
+      badge.textContent = "Live";
+      nameRow.append(badge);
+    }
+
+    player.append(nameRow);
+
+    const count = document.createElement("span");
+    count.className = "leaderboard-panel__count";
+    count.textContent = formatSubscriberCount(entry.subscriber_count);
+
+    item.append(rank, player, count);
+    return item;
+  });
+
+  leaderboardList.replaceChildren(...rows);
+}
+
 function syncSubscribersHud() {
+  const activeRank = leaderboardEntries.findIndex((entry) => entry.id === activeSubscriberProfileKey);
+
+  if (subscribersHudPlayer) {
+    subscribersHudPlayer.textContent = activeSubscriberName || "No player selected";
+  }
+  if (subscribersHudRank) {
+    subscribersHudRank.textContent =
+      activeRank >= 0
+        ? `Rank #${activeRank + 1}`
+        : isSubscriberSessionReady()
+        ? "Outside Top 20"
+        : "Login required";
+  }
   if (subscribersHudCount) {
     subscribersHudCount.textContent = formatSubscriberCount(subscriberCount);
   }
   if (subscribersHudDelta) {
     subscribersHudDelta.textContent =
-      !hasSubscriberOutcome
+      !isSubscriberSessionReady()
+        ? "Log in to start"
+        : !hasSubscriberOutcome
         ? "Session base"
         : lastSubscriberDelta === 0
         ? "No change last run"
@@ -765,7 +1051,259 @@ function syncSubscribersHud() {
   }
   if (subscribersHud) {
     subscribersHud.dataset.trend =
-      lastSubscriberDelta > 0 ? "up" : lastSubscriberDelta < 0 ? "down" : "flat";
+      isSubscriberSessionReady() && lastSubscriberDelta > 0
+        ? "up"
+        : isSubscriberSessionReady() && lastSubscriberDelta < 0
+        ? "down"
+        : "flat";
+  }
+  if (authSignOutButton) {
+    authSignOutButton.hidden = !isSubscriberSessionReady();
+  }
+}
+
+async function refreshSubscriberViews() {
+  if (!isSubscriberSessionReady()) {
+    leaderboardEntries = [];
+    renderLeaderboard();
+    syncSubscribersHud();
+    return;
+  }
+
+  try {
+    await fetchLeaderboard();
+  } catch (error) {
+    console.error("Unable to load leaderboard", error);
+    leaderboardEntries = [];
+  }
+
+  renderLeaderboard();
+  syncSubscribersHud();
+}
+
+async function ensureSubscriberProfile(user, preferredDisplayName = "") {
+  const displayName =
+    sanitizeSubscriberName(preferredDisplayName) ||
+    sanitizeSubscriberName(user?.user_metadata?.display_name) ||
+    getSubscriberDisplayNameFromEmail(user?.email ?? "") ||
+    "Player";
+
+  const payload = {
+    id: user.id,
+    email: sanitizeSubscriberEmail(user.email),
+    display_name: displayName,
+  };
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .upsert(payload, { onConflict: "id" })
+    .select("id, email, display_name, subscriber_count, last_subscriber_delta, has_subscriber_outcome, updated_at")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return normalizeSubscriberProfile(data);
+}
+
+async function loadSubscriberProfileFromSession(session, preferredDisplayName = "") {
+  if (!session?.user) {
+    clearActiveSubscriberProfile();
+    await refreshSubscriberViews();
+    openSessionGate();
+    return;
+  }
+
+  const profile = await ensureSubscriberProfile(session.user, preferredDisplayName);
+  activeSubscriberProfileKey = profile.id;
+  activeSubscriberEmail = profile.email;
+  activeSubscriberName = profile.display_name;
+  subscriberCount = profile.subscriber_count;
+  lastSubscriberDelta = profile.last_subscriber_delta;
+  hasSubscriberOutcome = profile.has_subscriber_outcome;
+  if (sessionGatePasswordInput) {
+    sessionGatePasswordInput.value = "";
+  }
+  closeSessionGate();
+  await refreshSubscriberViews();
+}
+
+async function persistSubscriberProgress() {
+  if (!isSubscriberSessionReady()) {
+    syncSubscribersHud();
+    return;
+  }
+
+  syncSubscribersHud();
+
+  const { error } = await supabase
+    .from("profiles")
+    .update({
+      email: activeSubscriberEmail,
+      display_name: activeSubscriberName,
+      subscriber_count: subscriberCount,
+      last_subscriber_delta: lastSubscriberDelta,
+      has_subscriber_outcome: hasSubscriberOutcome,
+    })
+    .eq("id", activeSubscriberProfileKey);
+
+  if (error) {
+    console.error("Unable to save subscriber progress", error);
+    return;
+  }
+
+  await refreshSubscriberViews();
+}
+
+async function handleSupabaseSession(session) {
+  try {
+    if (!session?.user) {
+      setAuthMode("login");
+      clearActiveSubscriberProfile();
+      if (sessionGatePasswordInput) {
+        sessionGatePasswordInput.value = "";
+      }
+      await refreshSubscriberViews();
+      openSessionGate();
+      return;
+    }
+
+    await loadSubscriberProfileFromSession(session);
+  } catch (error) {
+    console.error("Unable to load Supabase session", error);
+    setAuthMode("login");
+    clearActiveSubscriberProfile();
+    await refreshSubscriberViews();
+    openSessionGate();
+    setSessionGateMessage(error?.message || "Unable to load your account right now.");
+  }
+}
+
+async function initializeSupabaseAuth() {
+  setAuthMode("login");
+  setSessionGateBusy(true);
+  try {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) {
+      throw error;
+    }
+
+    if (data?.session) {
+      await handleSupabaseSession(data.session);
+    } else {
+      setAuthMode("login");
+      clearActiveSubscriberProfile();
+      await refreshSubscriberViews();
+      openSessionGate();
+    }
+  } catch (error) {
+    console.error("Unable to initialize auth", error);
+    setAuthMode("login");
+    clearActiveSubscriberProfile();
+    await refreshSubscriberViews();
+    openSessionGate();
+    setSessionGateMessage(error?.message || "Unable to initialize login.");
+  } finally {
+    setSessionGateBusy(false);
+  }
+
+  supabase.auth.onAuthStateChange((_event, session) => {
+    window.setTimeout(() => {
+      void handleSupabaseSession(session);
+    }, 0);
+  });
+}
+
+async function handleSessionGateSubmit(event) {
+  event.preventDefault();
+  if (isAuthBusy) {
+    return;
+  }
+
+  const email = sanitizeSubscriberEmail(sessionGateEmailInput?.value ?? "");
+  const password = sessionGatePasswordInput?.value ?? "";
+  const name = sanitizeSubscriberName(sessionGateNameInput?.value ?? "");
+
+  if (!isValidSubscriberEmail(email)) {
+    setSessionGateMessage("Enter a valid email address.");
+    sessionGateEmailInput?.focus();
+    return;
+  }
+
+  if (password.length < 6) {
+    setSessionGateMessage("Password must be at least 6 characters.");
+    sessionGatePasswordInput?.focus();
+    return;
+  }
+
+  if (authMode === "signup" && !name) {
+    setSessionGateMessage("Choose the display name you want on the leaderboard.");
+    sessionGateNameInput?.focus();
+    return;
+  }
+
+  setSessionGateBusy(true);
+  setSessionGateMessage("");
+
+  try {
+    if (authMode === "signup") {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            display_name: name,
+          },
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if (data.session) {
+        await loadSubscriberProfileFromSession(data.session, name);
+      } else {
+        setAuthMode("login");
+        setSessionGateMessage("Account created, but no session was returned. Check that Confirm email is disabled in Supabase.");
+      }
+    } else {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      await loadSubscriberProfileFromSession(data.session);
+    }
+  } catch (error) {
+    console.error("Supabase auth error", error);
+    setSessionGateMessage(error?.message || "Unable to authenticate right now.");
+  } finally {
+    setSessionGateBusy(false);
+  }
+}
+
+async function handleSignOut() {
+  if (isAuthBusy) {
+    return;
+  }
+
+  setSessionGateBusy(true);
+  try {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      throw error;
+    }
+  } catch (error) {
+    console.error("Unable to sign out", error);
+    setSessionGateMessage(error?.message || "Unable to sign out right now.");
+  } finally {
+    setSessionGateBusy(false);
   }
 }
 
@@ -784,7 +1322,7 @@ function handleSubscribersRunOutcome({ performance } = {}) {
   subscriberCount = nextCount;
   lastSubscriberDelta = appliedDelta;
   hasSubscriberOutcome = true;
-  syncSubscribersHud();
+  void persistSubscriberProgress();
 
   return {
     total: subscriberCount,
@@ -868,20 +1406,6 @@ const startBgMusicOnInteraction = () => {
 };
 canvas.addEventListener("click", startBgMusicOnInteraction);
 document.addEventListener("keydown", startBgMusicOnInteraction);
-const muteButton = document.querySelector("#muteButton");
-if (muteButton) {
-  muteButton.addEventListener("click", (e) => {
-    e.stopPropagation();
-    if (bgMusic) {
-      toggleBgMusicMute();
-    } else {
-      startBackgroundMusic();
-      canvas.removeEventListener("click", startBgMusicOnInteraction);
-      document.removeEventListener("keydown", startBgMusicOnInteraction);
-      if (bgMusic) muteButton.textContent = "🔊";
-    }
-  });
-}
 canvas.addEventListener("click", maybeLockWalkthrough);
 document.addEventListener("pointerlockchange", onPointerLockChange);
 document.addEventListener("mousemove", onPointerMove);
@@ -889,9 +1413,45 @@ window.addEventListener("resize", onResize);
 window.addEventListener("keydown", onKeyDown);
 window.addEventListener("keyup", onKeyUp);
 window.addEventListener("blur", clearMovementState);
+if (sessionGateForm) {
+  sessionGateForm.addEventListener("submit", (event) => {
+    void handleSessionGateSubmit(event);
+  });
+}
+if (sessionGateLoginModeButton) {
+  sessionGateLoginModeButton.addEventListener("click", () => {
+    setAuthMode("login");
+  });
+}
+if (sessionGateSignupModeButton) {
+  sessionGateSignupModeButton.addEventListener("click", () => {
+    setAuthMode("signup");
+  });
+}
+if (sessionGateEmailInput) {
+  sessionGateEmailInput.addEventListener("input", () => {
+    setSessionGateMessage("");
+  });
+}
+if (sessionGateNameInput) {
+  sessionGateNameInput.addEventListener("input", () => {
+    setSessionGateMessage("");
+  });
+}
+if (sessionGatePasswordInput) {
+  sessionGatePasswordInput.addEventListener("input", () => {
+    setSessionGateMessage("");
+  });
+}
+if (authSignOutButton) {
+  authSignOutButton.addEventListener("click", () => {
+    void handleSignOut();
+  });
+}
 
 syncUi();
 renderer.setAnimationLoop(animate);
+void initializeSupabaseAuth();
 
 function buildEnvironment() {
   const sky = new THREE.Mesh(
@@ -15370,17 +15930,26 @@ function enterOverviewMode(shouldUnlock = true) {
 }
 
 function syncUi() {
-  labelGroup.visible = state.mode === "overview";
+  const sessionActive = isSubscriberSessionReady() && !isSessionGateOpen();
+  const gameplayHudVisible = state.mode !== "minigame" && sessionActive;
+
+  labelGroup.visible = state.mode === "overview" && sessionActive;
+  if (subscribersHud) {
+    subscribersHud.hidden = !gameplayHudVisible;
+  }
+  if (leaderboardPanel) {
+    leaderboardPanel.hidden = !gameplayHudVisible;
+  }
   if (walkKeyHud) {
-    const visible = state.mode === "walk";
+    const visible = state.mode === "walk" && sessionActive;
     walkKeyHud.setAttribute("aria-hidden", visible ? "false" : "true");
   }
   if (walkLogoHud) {
-    const visible = state.mode === "walk";
+    const visible = state.mode === "walk" && sessionActive;
     walkLogoHud.setAttribute("aria-hidden", visible ? "false" : "true");
   }
   syncWalkKeyHud();
-  if (state.mode !== "walk") {
+  if (state.mode !== "walk" || !sessionActive) {
     hideInteractionPrompt();
   }
 }
@@ -15417,7 +15986,7 @@ function onPointerLockChange() {
 }
 
 function onPointerMove(event) {
-  if (state.mode !== "walk" || !isPointerLocked) {
+  if (state.mode !== "walk" || !isPointerLocked || !isSubscriberSessionReady() || isSessionGateOpen()) {
     return;
   }
 
@@ -15430,12 +15999,16 @@ function onPointerMove(event) {
 }
 
 function maybeLockWalkthrough() {
-  if (state.mode === "walk" && !isPointerLocked) {
+  if (state.mode === "walk" && !isPointerLocked && isSubscriberSessionReady() && !isSessionGateOpen()) {
     canvas.requestPointerLock();
   }
 }
 
 function onKeyDown(event) {
+  if (isSessionGateOpen()) {
+    return;
+  }
+
   if (state.mode === "minigame") {
     if (forecastFrenzy.handleKeyDown(event)) {
       return;
@@ -15469,7 +16042,6 @@ function onKeyDown(event) {
           toggleBgMusicMute();
         } else {
           startBackgroundMusic();
-          if (muteButton) muteButton.textContent = "🔊";
         }
       }
       break;
@@ -15544,6 +16116,10 @@ function onKeyDown(event) {
 }
 
 function onKeyUp(event) {
+  if (isSessionGateOpen()) {
+    return;
+  }
+
   if (state.mode === "minigame") {
     return;
   }

@@ -8,7 +8,8 @@
       {
         "imports": {
           "three": "https://unpkg.com/three@0.174.0/build/three.module.js",
-          "three/addons/": "https://unpkg.com/three@0.174.0/examples/jsm/"
+          "three/addons/": "https://unpkg.com/three@0.174.0/examples/jsm/",
+          "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2?bundle"
         }
       }
     </script>
@@ -18,13 +19,109 @@
   <body>
     <canvas id="scene"></canvas>
 
-    <div id="subscribersHud" class="subscribers-hud" data-trend="flat" aria-live="polite">
-      <div class="subscribers-hud__label">Subscribers</div>
-      <strong id="subscribersHudCount" class="subscribers-hud__count">50,000</strong>
-      <div id="subscribersHudDelta" class="subscribers-hud__delta">Session base</div>
+    <div id="sessionGate" class="session-gate" aria-hidden="true" hidden>
+      <div class="session-gate__scrim"></div>
+      <form id="sessionGateForm" class="session-gate__card" autocomplete="off">
+        <div class="session-gate__eyebrow">Account</div>
+        <h1 id="sessionGateTitle" class="session-gate__title">Log in to your TBPN account.</h1>
+        <p id="sessionGateCopy" class="session-gate__copy">
+          Your subscriber total and leaderboard spot are tied to your authenticated account.
+        </p>
+
+        <div class="session-gate__mode" role="tablist" aria-label="Authentication mode">
+          <button
+            id="sessionGateLoginMode"
+            class="session-gate__mode-button"
+            type="button"
+            data-active="true"
+          >
+            Log In
+          </button>
+          <button
+            id="sessionGateSignupMode"
+            class="session-gate__mode-button"
+            type="button"
+            data-active="false"
+          >
+            Create Account
+          </button>
+        </div>
+
+        <label id="sessionGateNameField" class="session-gate__field session-gate__field--hidden" for="sessionGateName" hidden>
+          <span class="session-gate__field-label">Display Name</span>
+          <input
+            id="sessionGateName"
+            class="session-gate__input"
+            name="name"
+            type="text"
+            maxlength="24"
+            placeholder="Enter your display name"
+            autocomplete="nickname"
+          />
+        </label>
+
+        <label class="session-gate__field" for="sessionGateEmail">
+          <span class="session-gate__field-label">Email</span>
+          <input
+            id="sessionGateEmail"
+            class="session-gate__input"
+            name="email"
+            type="email"
+            maxlength="120"
+            placeholder="you@example.com"
+            autocomplete="email"
+            required
+          />
+        </label>
+
+        <label class="session-gate__field" for="sessionGatePassword">
+          <span class="session-gate__field-label">Password</span>
+          <input
+            id="sessionGatePassword"
+            class="session-gate__input"
+            name="password"
+            type="password"
+            minlength="6"
+            maxlength="128"
+            placeholder="Enter your password"
+            autocomplete="current-password"
+            required
+          />
+        </label>
+
+        <p id="sessionGateLastPlayer" class="session-gate__hint">
+          Create an account once, then log in normally each session.
+        </p>
+        <p id="sessionGateError" class="session-gate__error" role="alert" aria-live="polite"></p>
+
+        <button id="sessionGateSubmit" class="session-gate__submit" type="submit">Log In</button>
+      </form>
     </div>
 
-    <button id="muteButton" type="button" class="mute-button" title="Mute music (M)" aria-label="Mute background music (M)">🔊</button>
+    <div id="subscribersHud" class="subscribers-hud" data-trend="flat" aria-live="polite">
+      <div class="subscribers-hud__label">Subscribers</div>
+      <div class="subscribers-hud__meta">
+        <span id="subscribersHudPlayer" class="subscribers-hud__player">No player selected</span>
+        <span id="subscribersHudRank" class="subscribers-hud__rank">Rank pending</span>
+      </div>
+      <strong id="subscribersHudCount" class="subscribers-hud__count">50,000</strong>
+      <div id="subscribersHudDelta" class="subscribers-hud__delta">Sign in to start</div>
+    </div>
+
+    <aside id="leaderboardPanel" class="leaderboard-panel" aria-live="polite">
+      <div class="leaderboard-panel__eyebrow">Global</div>
+      <div class="leaderboard-panel__header">
+        <strong class="leaderboard-panel__title">Subscriber Leaderboard</strong>
+        <div class="leaderboard-panel__header-actions">
+          <span id="leaderboardMeta" class="leaderboard-panel__meta">0 players</span>
+          <button id="authSignOutButton" class="leaderboard-panel__action" type="button" hidden>Log Out</button>
+        </div>
+      </div>
+      <div id="leaderboardEmpty" class="leaderboard-panel__empty">
+        Start a session to claim the first spot.
+      </div>
+      <ol id="leaderboardList" class="leaderboard-panel__list"></ol>
+    </aside>
 
     <div id="walkKeyHud" class="walk-key-hud" aria-hidden="true">
       <div class="walk-key-hud__label">Move</div>
