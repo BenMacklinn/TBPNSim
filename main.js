@@ -38,6 +38,7 @@ const PROJECTOR_STATUS_ENDPOINT = `${SUPABASE_URL}/functions/v1/tbpn-live-status
 const PROJECTOR_STATUS_REFRESH_MS = 30000;
 const PROJECTOR_HLS_MIME_TYPE = "application/vnd.apple.mpegurl";
 const PROJECTOR_YOUTUBE_CHANNEL_ID = "UC-DRzaGnL_vtBUpCFH5M0tg";
+const PROJECTOR_LAST_VIDEO_STORAGE_KEY = "tbpn-projector-last-video-id";
 const PROJECTOR_SCREEN_WIDTH = 3.8;
 const PROJECTOR_SCREEN_HEIGHT = 2.62;
 const FRONT_ROOM_TV_SCREEN_WIDTH = 1.04;
@@ -569,6 +570,14 @@ const walkKeyS = document.querySelector("#walkKeyS");
 const walkKeyD = document.querySelector("#walkKeyD");
 const walkKeyShift = document.querySelector("#walkKeyShift");
 const walkKeyJump = document.querySelector("#walkKeyJump");
+const suggestFeatureButton = document.querySelector("#suggestFeatureButton");
+const suggestFeaturePanel = document.querySelector("#suggestFeaturePanel");
+const suggestFeatureForm = document.querySelector("#suggestFeatureForm");
+const suggestFeatureMessageInput = document.querySelector("#suggestFeatureMessage");
+const suggestFeatureStatus = document.querySelector("#suggestFeatureStatus");
+const suggestFeatureSubmitButton = document.querySelector("#suggestFeatureSubmitButton");
+const suggestFeatureCancelButton = document.querySelector("#suggestFeatureCancelButton");
+const suggestFeatureCloseButton = document.querySelector("#suggestFeatureCloseButton");
 const forecastFrenzyRoot = document.querySelector("#forecastFrenzy");
 const tylerBoardRoot = document.querySelector("#tylerBoard");
 const nikChiefOfStaffRoot = document.querySelector("#nikChiefOfStaff");
@@ -608,6 +617,7 @@ const SUBSCRIBERS_STEP = 50;
 const SUBSCRIBERS_GAIN_THRESHOLD = 0.62;
 const SUBSCRIBER_EMAIL_LIMIT = 120;
 const SUBSCRIBER_NAME_LIMIT = 24;
+const SUGGESTION_MESSAGE_LIMIT = 500;
 const LEADERBOARD_LIMIT = 20;
 let subscriberCount = SUBSCRIBERS_START;
 let lastSubscriberDelta = 0;
@@ -618,6 +628,8 @@ let activeSubscriberName = "";
 let leaderboardEntries = [];
 let authMode = "login";
 let isAuthBusy = false;
+let isSuggestionBusy = false;
+let isSuggestionPanelOpen = false;
 let multiplayerConnectionState = "offline";
 let multiplayerOnlineCount = 0;
 let multiplayerPresenceKey = "";
@@ -645,6 +657,7 @@ let projectorPrimaryDisplay = null;
 const projectorMirroredDisplays = [];
 let projectorYoutubeAudioUnlocked = false;
 let projectorAudioAudible = false;
+let projectorLastKnownVideoId = "";
 const multiplayerRoomId = getMultiplayerRoomId();
 const multiplayerClientId =
   globalThis.crypto?.randomUUID?.() ?? `client-${Math.random().toString(36).slice(2, 10)}`;
@@ -1053,7 +1066,34 @@ function normalizeProjectorStatusPayload(payload) {
   };
 }
 
-function buildProjectorYoutubeEmbedUrl(videoId = "") {
+function loadStoredProjectorVideoId() {
+  if (projectorLastKnownVideoId) {
+    return projectorLastKnownVideoId;
+  }
+
+  try {
+    projectorLastKnownVideoId = localStorage.getItem(PROJECTOR_LAST_VIDEO_STORAGE_KEY)?.trim() ?? "";
+  } catch (_error) {
+    projectorLastKnownVideoId = "";
+  }
+
+  return projectorLastKnownVideoId;
+}
+
+function rememberProjectorVideoId(videoId = "") {
+  projectorLastKnownVideoId = typeof videoId === "string" ? videoId.trim() : "";
+  if (!projectorLastKnownVideoId) {
+    return;
+  }
+
+  try {
+    localStorage.setItem(PROJECTOR_LAST_VIDEO_STORAGE_KEY, projectorLastKnownVideoId);
+  } catch (_error) {
+    // Ignore storage write failures; replay will still work for this session.
+  }
+}
+
+function buildProjectorYoutubeEmbedUrl(videoId = "", { replay = false } = {}) {
   const params = new URLSearchParams({
     autoplay: "1",
     mute: "1",
@@ -1068,6 +1108,11 @@ function buildProjectorYoutubeEmbedUrl(videoId = "") {
   }
 
   if (videoId) {
+    if (replay) {
+      params.set("loop", "1");
+      params.set("playlist", videoId);
+      params.set("start", "0");
+    }
     return `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?${params.toString()}`;
   }
 
@@ -1169,13 +1214,13 @@ function hideProjectorDisplayOverlay(display) {
   display.cssIframe.removeAttribute("src");
 }
 
-function showProjectorDisplayOverlay(display, videoId = "") {
+function showProjectorDisplayOverlay(display, videoId = "", options = {}) {
   if (!display?.cssObject || !display.cssIframe) {
     return;
   }
 
   const nextVideoId = videoId || "";
-  const nextUrl = buildProjectorYoutubeEmbedUrl(nextVideoId);
+  const nextUrl = buildProjectorYoutubeEmbedUrl(nextVideoId, options);
   if (display.youtubeVideoId !== nextVideoId || display.cssIframe.src !== nextUrl) {
     display.cssIframe.src = nextUrl;
     display.youtubeVideoId = nextVideoId;
@@ -1191,10 +1236,10 @@ function hideProjectorYoutubeOverlay() {
   updateProjectorAudioZone();
 }
 
-function showProjectorYoutubeOverlay(videoId = "") {
-  showProjectorDisplayOverlay(projectorPrimaryDisplay, videoId);
+function showProjectorYoutubeOverlay(videoId = "", options = {}) {
+  showProjectorDisplayOverlay(projectorPrimaryDisplay, videoId, options);
   projectorMirroredDisplays.forEach((display) => {
-    showProjectorDisplayOverlay(display, videoId);
+    showProjectorDisplayOverlay(display, videoId, options);
   });
   updateProjectorDisplayVisibility();
   updateProjectorAudioZone();
@@ -1587,16 +1632,32 @@ async function refreshProjectorStatus() {
     .then(async (payload) => {
       const nextStatus = normalizeProjectorStatusPayload(payload);
       if (!nextStatus?.live) {
+        const replayVideoId = loadStoredProjectorVideoId();
+        if (replayVideoId) {
+          showProjectorYoutubeOverlay(replayVideoId, { replay: true });
+          applyProjectorFallbackTexture();
+          return;
+        }
+
         hideProjectorYoutubeOverlay();
         applyProjectorFallbackTexture();
         return;
       }
 
+      if (nextStatus.videoId) {
+        rememberProjectorVideoId(nextStatus.videoId);
+      }
       showProjectorYoutubeOverlay(nextStatus.videoId);
       applyProjectorFallbackTexture();
     })
     .catch((error) => {
       console.error("Unable to refresh projector status", error);
+      const replayVideoId = loadStoredProjectorVideoId();
+      if (replayVideoId) {
+        showProjectorYoutubeOverlay(replayVideoId, { replay: true });
+        applyProjectorFallbackTexture();
+        return;
+      }
       showProjectorYoutubeOverlay();
       applyProjectorFallbackTexture();
     })
@@ -2707,11 +2768,148 @@ function isSubscriberSessionReady() {
   return Boolean(activeSubscriberProfileKey);
 }
 
+function sanitizeSuggestionMessage(value) {
+  return String(value ?? "")
+    .replace(/\r\n/g, "\n")
+    .trim()
+    .slice(0, SUGGESTION_MESSAGE_LIMIT);
+}
+
+function setSuggestionStatus(message = "", tone = "neutral") {
+  if (!suggestFeatureStatus) {
+    return;
+  }
+  suggestFeatureStatus.textContent = message;
+  suggestFeatureStatus.dataset.tone = tone;
+}
+
+function setSuggestionBusy(isBusyNow) {
+  isSuggestionBusy = isBusyNow;
+  if (suggestFeatureMessageInput) {
+    suggestFeatureMessageInput.disabled = isBusyNow;
+  }
+  if (suggestFeatureSubmitButton) {
+    suggestFeatureSubmitButton.disabled = isBusyNow;
+    suggestFeatureSubmitButton.textContent = isBusyNow ? "Sending..." : "Send";
+  }
+  if (suggestFeatureCancelButton) {
+    suggestFeatureCancelButton.disabled = isBusyNow;
+  }
+  if (suggestFeatureCloseButton) {
+    suggestFeatureCloseButton.disabled = isBusyNow;
+  }
+  if (suggestFeatureButton) {
+    suggestFeatureButton.disabled = isBusyNow;
+  }
+}
+
+function closeSuggestFeaturePanel() {
+  if (!suggestFeaturePanel) {
+    return;
+  }
+
+  isSuggestionPanelOpen = false;
+  suggestFeaturePanel.hidden = true;
+  suggestFeaturePanel.setAttribute("aria-hidden", "true");
+  setSuggestionBusy(false);
+  setSuggestionStatus("");
+  clearMovementState();
+  syncUi();
+}
+
+function openSuggestFeaturePanel() {
+  if (!isSubscriberSessionReady()) {
+    openSessionGate();
+    setSessionGateMessage("Log in to send a suggestion.");
+    return;
+  }
+
+  if (!suggestFeaturePanel) {
+    return;
+  }
+
+  unlockPointer();
+  clearMovementState();
+  isSuggestionPanelOpen = true;
+  suggestFeaturePanel.hidden = false;
+  suggestFeaturePanel.setAttribute("aria-hidden", "false");
+  setSuggestionBusy(false);
+  setSuggestionStatus("Suggestions are saved to your TBPN account.", "neutral");
+  syncUi();
+
+  if (suggestFeatureMessageInput) {
+    requestAnimationFrame(() => {
+      suggestFeatureMessageInput.focus();
+      suggestFeatureMessageInput.select();
+    });
+  }
+}
+
+async function handleSuggestFeatureSubmit(event) {
+  event.preventDefault();
+  if (isSuggestionBusy) {
+    return;
+  }
+
+  if (!isSubscriberSessionReady()) {
+    closeSuggestFeaturePanel();
+    openSessionGate();
+    setSessionGateMessage("Log in to send a suggestion.");
+    return;
+  }
+
+  const message = sanitizeSuggestionMessage(suggestFeatureMessageInput?.value ?? "");
+  if (!message) {
+    setSuggestionStatus("Write a quick suggestion first.", "error");
+    suggestFeatureMessageInput?.focus();
+    return;
+  }
+
+  setSuggestionBusy(true);
+  setSuggestionStatus("");
+
+  try {
+    const { error } = await supabase
+      .from("suggestions")
+      .insert({
+        profile_id: activeSubscriberProfileKey,
+        email: activeSubscriberEmail,
+        display_name: activeSubscriberName,
+        message,
+      });
+
+    if (error) {
+      throw error;
+    }
+
+    if (suggestFeatureMessageInput) {
+      suggestFeatureMessageInput.value = "";
+    }
+    setSuggestionStatus("Suggestion sent.", "success");
+    window.setTimeout(() => {
+      if (isSuggestionPanelOpen) {
+        closeSuggestFeaturePanel();
+      }
+    }, 900);
+  } catch (error) {
+    console.error("Unable to submit suggestion", error);
+    const errorMessage = String(error?.message ?? "");
+    if (/relation .*suggestions/i.test(errorMessage)) {
+      setSuggestionStatus("Run the latest Supabase schema to enable suggestions.", "error");
+    } else {
+      setSuggestionStatus(error?.message || "Unable to send your suggestion right now.", "error");
+    }
+  } finally {
+    setSuggestionBusy(false);
+  }
+}
+
 function openSessionGate() {
   if (!sessionGate) {
     return;
   }
 
+  closeSuggestFeaturePanel();
   unlockPointer();
   clearMovementState();
   sessionGate.hidden = false;
@@ -3240,6 +3438,37 @@ if (sessionGatePasswordInput) {
 if (authSignOutButton) {
   authSignOutButton.addEventListener("click", () => {
     void handleSignOut();
+  });
+}
+if (suggestFeatureButton) {
+  suggestFeatureButton.addEventListener("click", () => {
+    if (isSuggestionPanelOpen) {
+      closeSuggestFeaturePanel();
+      return;
+    }
+    openSuggestFeaturePanel();
+  });
+}
+if (suggestFeatureForm) {
+  suggestFeatureForm.addEventListener("submit", (event) => {
+    void handleSuggestFeatureSubmit(event);
+  });
+}
+if (suggestFeatureMessageInput) {
+  suggestFeatureMessageInput.addEventListener("input", () => {
+    if (suggestFeatureStatus?.dataset.tone === "error") {
+      setSuggestionStatus("");
+    }
+  });
+}
+if (suggestFeatureCancelButton) {
+  suggestFeatureCancelButton.addEventListener("click", () => {
+    closeSuggestFeaturePanel();
+  });
+}
+if (suggestFeatureCloseButton) {
+  suggestFeatureCloseButton.addEventListener("click", () => {
+    closeSuggestFeaturePanel();
   });
 }
 
@@ -18067,6 +18296,12 @@ function syncUi() {
   const sessionActive = isSubscriberSessionReady() && !isSessionGateOpen();
   const gameplayHudVisible = state.mode !== "minigame" && sessionActive;
 
+  if (!gameplayHudVisible && isSuggestionPanelOpen) {
+    isSuggestionPanelOpen = false;
+    setSuggestionStatus("");
+    setSuggestionBusy(false);
+  }
+
   labelGroup.visible = state.mode === "overview" && sessionActive;
   remotePlayerGroup.visible = sessionActive;
   if (subscribersHud) {
@@ -18074,6 +18309,14 @@ function syncUi() {
   }
   if (leaderboardPanel) {
     leaderboardPanel.hidden = !gameplayHudVisible;
+  }
+  if (suggestFeatureButton) {
+    suggestFeatureButton.hidden = !gameplayHudVisible;
+  }
+  if (suggestFeaturePanel) {
+    const visible = gameplayHudVisible && isSuggestionPanelOpen;
+    suggestFeaturePanel.hidden = !visible;
+    suggestFeaturePanel.setAttribute("aria-hidden", visible ? "false" : "true");
   }
   if (walkKeyHud) {
     const visible = state.mode === "walk" && sessionActive;
@@ -18136,12 +18379,26 @@ function onPointerMove(event) {
 }
 
 function maybeLockWalkthrough() {
-  if (state.mode === "walk" && !isPointerLocked && isSubscriberSessionReady() && !isSessionGateOpen()) {
+  if (
+    state.mode === "walk" &&
+    !isPointerLocked &&
+    isSubscriberSessionReady() &&
+    !isSessionGateOpen() &&
+    !isSuggestionPanelOpen
+  ) {
     canvas.requestPointerLock();
   }
 }
 
 function onKeyDown(event) {
+  if (isSuggestionPanelOpen) {
+    if (event.code === "Escape") {
+      event.preventDefault();
+      closeSuggestFeaturePanel();
+    }
+    return;
+  }
+
   if (isSessionGateOpen()) {
     return;
   }
@@ -18253,6 +18510,10 @@ function onKeyDown(event) {
 }
 
 function onKeyUp(event) {
+  if (isSuggestionPanelOpen) {
+    return;
+  }
+
   if (isSessionGateOpen()) {
     return;
   }
