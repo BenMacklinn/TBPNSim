@@ -2834,7 +2834,7 @@ function openSuggestFeaturePanel() {
   suggestFeaturePanel.hidden = false;
   suggestFeaturePanel.setAttribute("aria-hidden", "false");
   setSuggestionBusy(false);
-  setSuggestionStatus("Suggestions are saved to your TBPN account.", "neutral");
+  setSuggestionStatus("");
   syncUi();
 
   if (suggestFeatureMessageInput) {
