@@ -1093,7 +1093,8 @@ function normalizeMultiplayerPresenceSnapshot(snapshot) {
   const pitch = Number(snapshot.pitch);
   const facingYaw = Number(snapshot.facingYaw);
   const motion = Number(snapshot.motion);
-  const seatSurfaceHeight = Number(snapshot.seatSurfaceHeight);
+  const seatSurfaceHeight =
+    snapshot.seatSurfaceHeight == null ? Number.NaN : Number(snapshot.seatSurfaceHeight);
 
   return {
     presenceKey: typeof snapshot.presenceKey === "string" ? snapshot.presenceKey : "",
@@ -1184,6 +1185,7 @@ function createRemotePlayerEntry(key, snapshot) {
     pose: "idle",
     seatSurfaceHeight: DEFAULT_SEAT_SURFACE_HEIGHT,
     animationPhase: (hashString(key) % 628) / 100,
+    visibleMotion: 0,
   };
 
   applyRemotePlayerSnapshot(entry, snapshot, true);
@@ -16288,12 +16290,12 @@ function animateRemotePlayers(delta, elapsedTime) {
       entry.targetFacingYaw,
     ) * turnStep;
 
-    const visibleMotion = THREE.MathUtils.lerp(
-      entry.avatar.userData.motion ?? 0,
+    entry.visibleMotion = THREE.MathUtils.lerp(
+      entry.visibleMotion ?? 0,
       entry.targetMotion,
       motionStep,
     );
-    entry.avatar.userData.motion = visibleMotion;
+    const visibleMotion = entry.visibleMotion;
 
     if (entry.pose === "seated") {
       entry.avatar.leftArmPivot.rotation.x = -0.18;
