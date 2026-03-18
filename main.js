@@ -212,6 +212,7 @@ const GOALPOST_HOLD_TILT_Z = -0.16;
 const MULTIPLAYER_TRACK_INTERVAL_MS = 120;
 const MULTIPLAYER_IDLE_REFRESH_MS = 2500;
 const MULTIPLAYER_CHANNEL_PREFIX = "tbpn-sim:world";
+const MULTIPLAYER_BROADCAST_EVENT = "pose";
 const REMOTE_PLAYER_POSITION_LERP = 9;
 const REMOTE_PLAYER_TURN_LERP = 10;
 const REMOTE_PLAYER_MOTION_LERP = 8;
@@ -603,9 +604,11 @@ let multiplayerOnlineCount = 0;
 let multiplayerPresenceKey = "";
 let multiplayerChannel = null;
 let multiplayerSubscribed = false;
+let multiplayerPresenceTracked = false;
 let multiplayerLastTrackAt = 0;
 let multiplayerLastPayloadSignature = "";
 let multiplayerTrackPromise = null;
+let multiplayerBroadcastPromise = null;
 const multiplayerRoomId = getMultiplayerRoomId();
 const multiplayerClientId =
   globalThis.crypto?.randomUUID?.() ?? `client-${Math.random().toString(36).slice(2, 10)}`;
@@ -1040,6 +1043,7 @@ function getLocalMultiplayerPose() {
 
 function buildLocalMultiplayerPresenceSnapshot() {
   return {
+    presenceKey: multiplayerPresenceKey,
     clientId: multiplayerClientId,
     profileId: activeSubscriberProfileKey,
     displayName: sanitizeSubscriberName(activeSubscriberName) || "Player",
@@ -1092,6 +1096,7 @@ function normalizeMultiplayerPresenceSnapshot(snapshot) {
   const seatSurfaceHeight = Number(snapshot.seatSurfaceHeight);
 
   return {
+    presenceKey: typeof snapshot.presenceKey === "string" ? snapshot.presenceKey : "",
     clientId: typeof snapshot.clientId === "string" ? snapshot.clientId : "",
     profileId: typeof snapshot.profileId === "string" ? snapshot.profileId : "",
     displayName: sanitizeSubscriberName(snapshot.displayName ?? snapshot.name ?? "") || "Player",
@@ -1248,7 +1253,9 @@ function collectMultiplayerPresenceSnapshots() {
       if (snapshots.length === 0) {
         return null;
       }
-      return { key, snapshot: snapshots[snapshots.length - 1] };
+      const snapshot = snapshots[snapshots.length - 1];
+      snapshot.presenceKey = snapshot.presenceKey || key;
+      return { key, snapshot };
     })
     .filter(Boolean);
 }
@@ -1258,19 +1265,20 @@ function syncRemotePlayersFromPresence() {
   const nextKeys = new Set();
 
   snapshots.forEach(({ key, snapshot }) => {
-    if (key === multiplayerPresenceKey || snapshot.clientId === multiplayerClientId) {
+    const remoteKey = snapshot.presenceKey || key;
+    if (remoteKey === multiplayerPresenceKey || snapshot.clientId === multiplayerClientId) {
       return;
     }
 
-    nextKeys.add(key);
+    nextKeys.add(remoteKey);
 
-    const existingEntry = remotePlayers.get(key);
+    const existingEntry = remotePlayers.get(remoteKey);
     if (existingEntry) {
       applyRemotePlayerSnapshot(existingEntry, snapshot);
       return;
     }
 
-    remotePlayers.set(key, createRemotePlayerEntry(key, snapshot));
+    remotePlayers.set(remoteKey, createRemotePlayerEntry(remoteKey, snapshot));
   });
 
   Array.from(remotePlayers.keys()).forEach((key) => {
@@ -1281,6 +1289,28 @@ function syncRemotePlayersFromPresence() {
 
   multiplayerOnlineCount = snapshots.length;
   syncMultiplayerHud();
+}
+
+function handleMultiplayerBroadcast(payload) {
+  const snapshot = normalizeMultiplayerPresenceSnapshot(payload);
+  if (!snapshot) {
+    return;
+  }
+
+  const remoteKey =
+    snapshot.presenceKey ||
+    (snapshot.profileId && snapshot.clientId ? `${snapshot.profileId}:${snapshot.clientId}` : snapshot.clientId);
+  if (!remoteKey || remoteKey === multiplayerPresenceKey || snapshot.clientId === multiplayerClientId) {
+    return;
+  }
+
+  const existingEntry = remotePlayers.get(remoteKey);
+  if (existingEntry) {
+    applyRemotePlayerSnapshot(existingEntry, snapshot);
+    return;
+  }
+
+  remotePlayers.set(remoteKey, createRemotePlayerEntry(remoteKey, snapshot));
 }
 
 function syncMultiplayerHud() {
@@ -1324,11 +1354,13 @@ function disconnectMultiplayerSession() {
 
   multiplayerChannel = null;
   multiplayerSubscribed = false;
+  multiplayerPresenceTracked = false;
   multiplayerPresenceKey = "";
   multiplayerOnlineCount = 0;
   multiplayerLastTrackAt = 0;
   multiplayerLastPayloadSignature = "";
   multiplayerTrackPromise = null;
+  multiplayerBroadcastPromise = null;
   multiplayerConnectionState = "offline";
 
   clearRemotePlayers();
@@ -1348,6 +1380,7 @@ function ensureMultiplayerSession() {
 
   const nextPresenceKey = `${activeSubscriberProfileKey}:${multiplayerClientId}`;
   if (multiplayerChannel && multiplayerPresenceKey === nextPresenceKey) {
+    trackLocalMultiplayerPresence(true);
     scheduleLocalMultiplayerPresence(true);
     return;
   }
@@ -1372,6 +1405,12 @@ function ensureMultiplayerSession() {
     }
     syncRemotePlayersFromPresence();
   });
+  channel.on("broadcast", { event: MULTIPLAYER_BROADCAST_EVENT }, ({ payload }) => {
+    if (channel !== multiplayerChannel) {
+      return;
+    }
+    handleMultiplayerBroadcast(payload);
+  });
 
   channel.subscribe((status) => {
     if (channel !== multiplayerChannel) {
@@ -1382,12 +1421,14 @@ function ensureMultiplayerSession() {
       multiplayerSubscribed = true;
       multiplayerConnectionState = "connected";
       syncMultiplayerHud();
+      trackLocalMultiplayerPresence(true);
       scheduleLocalMultiplayerPresence(true);
       return;
     }
 
     if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
       multiplayerSubscribed = false;
+      multiplayerPresenceTracked = false;
       multiplayerConnectionState = "error";
       multiplayerOnlineCount = 0;
       clearRemotePlayers();
@@ -1397,12 +1438,44 @@ function ensureMultiplayerSession() {
 
     if (status === "CLOSED") {
       multiplayerSubscribed = false;
+      multiplayerPresenceTracked = false;
       multiplayerConnectionState = "offline";
       multiplayerOnlineCount = 0;
       clearRemotePlayers();
       syncMultiplayerHud();
     }
   });
+}
+
+function trackLocalMultiplayerPresence(force = false) {
+  if (!multiplayerChannel || !multiplayerSubscribed || !isSubscriberSessionReady()) {
+    return;
+  }
+
+  if (!force && multiplayerPresenceTracked) {
+    return;
+  }
+
+  if (multiplayerTrackPromise) {
+    return;
+  }
+
+  multiplayerTrackPromise = multiplayerChannel.track(buildLocalMultiplayerPresenceSnapshot())
+    .then(() => {
+      multiplayerPresenceTracked = true;
+      if (multiplayerConnectionState !== "connected") {
+        multiplayerConnectionState = "connected";
+        syncMultiplayerHud();
+      }
+    })
+    .catch((error) => {
+      console.error("Unable to publish multiplayer presence", error);
+      multiplayerConnectionState = "error";
+      syncMultiplayerHud();
+    })
+    .finally(() => {
+      multiplayerTrackPromise = null;
+    });
 }
 
 function scheduleLocalMultiplayerPresence(force = false) {
@@ -1420,11 +1493,15 @@ function scheduleLocalMultiplayerPresence(force = false) {
     return;
   }
 
-  if (multiplayerTrackPromise) {
+  if (multiplayerBroadcastPromise) {
     return;
   }
 
-  multiplayerTrackPromise = multiplayerChannel.track(payload)
+  multiplayerBroadcastPromise = multiplayerChannel.send({
+    type: "broadcast",
+    event: MULTIPLAYER_BROADCAST_EVENT,
+    payload,
+  })
     .then(() => {
       multiplayerLastTrackAt = performance.now();
       multiplayerLastPayloadSignature = payloadSignature;
@@ -1439,7 +1516,7 @@ function scheduleLocalMultiplayerPresence(force = false) {
       syncMultiplayerHud();
     })
     .finally(() => {
-      multiplayerTrackPromise = null;
+      multiplayerBroadcastPromise = null;
     });
 }
 
