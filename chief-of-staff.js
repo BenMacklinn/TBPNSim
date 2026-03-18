@@ -244,6 +244,10 @@ function buildResultData({ score, lines, level, elapsed }) {
   };
 }
 
+function getSubscriberPerformance({ score, lines }) {
+  return clamp(lines / 18 * 0.55 + score / 6500 * 0.45, 0, 1);
+}
+
 class CalendarArcadeAudio {
   constructor() {
     this.context = null;
@@ -324,9 +328,10 @@ class CalendarArcadeAudio {
 }
 
 export class NikChiefOfStaffOverlay {
-  constructor({ root, onExit }) {
+  constructor({ root, onExit, onRunComplete }) {
     this.root = root;
     this.onExit = onExit;
+    this.onRunComplete = onRunComplete;
     this.audio = new CalendarArcadeAudio();
 
     this.introLineElement = root.querySelector("#nikChiefOfStaffIntroLine");
@@ -363,6 +368,7 @@ export class NikChiefOfStaffOverlay {
     this.fadeAlpha = 0;
     this.introOverlayAlpha = 0;
     this.cabinetVisible = false;
+    this.subscriberResult = null;
 
     this.exitButton?.addEventListener("click", () => this.exit("exit"));
     this.replayButton?.addEventListener("click", () => this.start({ introLine: this.introLine }));
@@ -427,6 +433,7 @@ export class NikChiefOfStaffOverlay {
     this.dropAccumulator = 0;
     this.message = "Keep Nik's calendar clear.";
     this.resultData = null;
+    this.subscriberResult = null;
     this.lastQueueSignature = "";
   }
 
@@ -642,6 +649,16 @@ export class NikChiefOfStaffOverlay {
       level: this.level,
       elapsed: this.elapsed,
     });
+    this.subscriberResult =
+      typeof this.onRunComplete === "function"
+        ? this.onRunComplete({
+            gameId: "nikChiefOfStaff",
+            performance: getSubscriberPerformance({
+              score: this.score,
+              lines: this.lines,
+            }),
+          })
+        : null;
     this.audio.playGameOver();
     this.sync();
   }
@@ -806,7 +823,14 @@ export class NikChiefOfStaffOverlay {
     }
     if (this.resultStatsElement) {
       this.resultStatsElement.replaceChildren();
-      this.resultData.chips.forEach((chip) => {
+      const baseChips = this.subscriberResult
+        ? this.resultData.chips.filter((chip) => !chip.startsWith("Score "))
+        : this.resultData.chips;
+      const resultChips = [
+        ...(this.subscriberResult ? [this.subscriberResult.totalText, this.subscriberResult.deltaChipText] : []),
+        ...baseChips,
+      ];
+      resultChips.forEach((chip) => {
         const chipElement = document.createElement("div");
         chipElement.className = "forecast-frenzy__chip";
         chipElement.textContent = chip;

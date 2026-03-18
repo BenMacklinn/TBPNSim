@@ -166,6 +166,10 @@ function getScoreRank(score) {
   return "Made It Out";
 }
 
+function getSubscriberPerformance(score) {
+  return clamp((score - 100) / 900, 0, 1);
+}
+
 function clonePieces(pieces) {
   return pieces.map((piece) => ({ ...piece }));
 }
@@ -788,9 +792,10 @@ class SlidingPuzzleRenderer {
 }
 
 export class TylerBoardOverlay {
-  constructor({ root, onExit }) {
+  constructor({ root, onExit, onRunComplete }) {
     this.root = root;
     this.onExit = onExit;
+    this.onRunComplete = onRunComplete;
     this.audio = new SlidingPuzzleAudio();
     this.state = new SlidingPuzzleState(SLIDING_PUZZLE_LEVELS);
     this.renderer = new SlidingPuzzleRenderer({
@@ -808,15 +813,22 @@ export class TylerBoardOverlay {
     this.exitReason = "exit";
     this.introLine = "Drag blocks freely, or use the border rails to shove them.";
     this.animationTimeRemaining = 0;
+    this.subscriberResult = null;
 
     this.sync();
   }
 
   createSnapshot() {
-    return this.state.createSnapshot({
+    const snapshot = this.state.createSnapshot({
       animating: this.animationTimeRemaining > 0,
       introLine: this.introLine,
     });
+    if (snapshot.complete && this.subscriberResult) {
+      snapshot.resultMeta = `${this.subscriberResult.totalText} • ${this.subscriberResult.shortDeltaText} • ${
+        snapshot.elapsedText
+      } • ${snapshot.moves} moves`;
+    }
+    return snapshot;
   }
 
   sync() {
@@ -841,6 +853,7 @@ export class TylerBoardOverlay {
     this.cabinetVisible = false;
     this.exitReason = "exit";
     this.introLine = introLine;
+    this.subscriberResult = null;
     this.root.classList.remove("forecast-frenzy--hidden");
     this.root.setAttribute("aria-hidden", "false");
     this.sync();
@@ -859,6 +872,7 @@ export class TylerBoardOverlay {
     this.audio.ensureContext();
     this.state.randomizeLevel();
     this.animationTimeRemaining = 0;
+    this.subscriberResult = null;
     this.sync();
   }
 
@@ -876,6 +890,14 @@ export class TylerBoardOverlay {
     this.animationTimeRemaining = MOVE_ANIMATION_TIME;
     this.audio.playSlide();
     if (result.won) {
+      const snapshot = this.state.createSnapshot();
+      this.subscriberResult =
+        typeof this.onRunComplete === "function"
+          ? this.onRunComplete({
+              gameId: "tylerBoard",
+              performance: getSubscriberPerformance(snapshot.score),
+            })
+          : null;
       this.audio.playWin();
     }
     this.sync();

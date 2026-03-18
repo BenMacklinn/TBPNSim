@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://d24me0haikrwe"
+path="res://.godot/imported/ES_Arcade - Osoku.mp3-e3950eced7ec06c5b97e33eb52c5501c.mp3str"
+
+[deps]
+
+source_file="res://ES_Arcade - Osoku.mp3"
+dest_files=["res://.godot/imported/ES_Arcade - Osoku.mp3-e3950eced7ec06c5b97e33eb52c5501c.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

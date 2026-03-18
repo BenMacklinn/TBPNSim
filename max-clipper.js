@@ -175,6 +175,13 @@ function buildResult(stats, reason) {
   };
 }
 
+function getSubscriberPerformance(stats) {
+  const scoreRatio = clamp((stats.score + 900) / 4200, 0, 1);
+  const hitRatio = clamp(stats.goodHits / 21, 0, 1);
+  const engagementRatio = clamp(stats.engagement / MAX_ENGAGEMENT, 0, 1);
+  return clamp(scoreRatio * 0.45 + hitRatio * 0.35 + engagementRatio * 0.2, 0, 1);
+}
+
 class ClipperAudio {
   constructor() {
     this.context = null;
@@ -252,9 +259,10 @@ class ClipperAudio {
 }
 
 export class MaxClipperOverlay {
-  constructor({ root, onExit }) {
+  constructor({ root, onExit, onRunComplete }) {
     this.root = root;
     this.onExit = onExit;
+    this.onRunComplete = onRunComplete;
     this.audio = new ClipperAudio();
 
     this.introLineElement = root.querySelector("#maxClipperIntroLine");
@@ -289,6 +297,7 @@ export class MaxClipperOverlay {
     this.feedback = { text: "", tone: "neutral", remaining: 0 };
     this.introLine = "Whack the postable moments before they duck back under.";
     this.resultData = null;
+    this.subscriberResult = null;
     this.stats = this.createEmptyStats();
     this.fadeAlpha = 0;
     this.introOverlayAlpha = 0;
@@ -356,6 +365,7 @@ export class MaxClipperOverlay {
     this.elapsed = 0;
     this.feedback = { text: "", tone: "neutral", remaining: 0 };
     this.resultData = null;
+    this.subscriberResult = null;
     this.stats = this.createEmptyStats();
     this.spawnTimer = 0.56;
     this.phase = "playing";
@@ -375,6 +385,7 @@ export class MaxClipperOverlay {
     this.elapsed = 0;
     this.feedback = { text: "", tone: "neutral", remaining: 0 };
     this.resultData = null;
+    this.subscriberResult = null;
     this.stats = this.createEmptyStats();
     this.phaseTime = 0;
     this.introOverlayAlpha = 0;
@@ -635,6 +646,13 @@ export class MaxClipperOverlay {
 
     this.phase = "result";
     this.resultData = buildResult(this.stats, reason);
+    this.subscriberResult =
+      typeof this.onRunComplete === "function"
+        ? this.onRunComplete({
+            gameId: "maxClipper",
+            performance: getSubscriberPerformance(this.stats),
+          })
+        : null;
     this.audio.playFinish();
     this.sync();
   }
@@ -704,7 +722,14 @@ export class MaxClipperOverlay {
     this.resultRankElement.textContent = this.resultData.rank;
     this.resultSummaryElement.textContent = this.resultData.summary;
     this.resultStatsElement.replaceChildren();
-    this.resultData.chips.forEach((chip) => {
+    const baseChips = this.subscriberResult
+      ? this.resultData.chips.filter((chip) => !chip.startsWith("Score "))
+      : this.resultData.chips;
+    const resultChips = [
+      ...(this.subscriberResult ? [this.subscriberResult.totalText, this.subscriberResult.deltaChipText] : []),
+      ...baseChips,
+    ];
+    resultChips.forEach((chip) => {
       const chipElement = document.createElement("div");
       chipElement.className = "forecast-frenzy__chip";
       chipElement.textContent = chip;

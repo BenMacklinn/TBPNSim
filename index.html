@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Ultradome Simulator</title>
+    <title>TBPN Simulator</title>
     <script type="importmap">
       {
         "imports": {
@@ -12,16 +12,19 @@
         }
       }
     </script>
+    <link rel="icon" href="./favicon.png" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <canvas id="scene"></canvas>
 
-    <div id="coordinateDisplay" class="coordinate-display" aria-hidden="true">
-      <span id="coordX">x: 0</span>
-      <span id="coordY">y: 0</span>
-      <span id="coordZ">z: 0</span>
+    <div id="subscribersHud" class="subscribers-hud" data-trend="flat" aria-live="polite">
+      <div class="subscribers-hud__label">Subscribers</div>
+      <strong id="subscribersHudCount" class="subscribers-hud__count">50,000</strong>
+      <div id="subscribersHudDelta" class="subscribers-hud__delta">Session base</div>
     </div>
+
+    <button id="muteButton" type="button" class="mute-button" title="Mute music (M)" aria-label="Mute background music (M)">🔊</button>
 
     <div id="walkKeyHud" class="walk-key-hud" aria-hidden="true">
       <div class="walk-key-hud__label">Move</div>
@@ -544,26 +547,15 @@
     <div id="producerMan" class="forecast-frenzy producer-man forecast-frenzy--hidden" aria-hidden="true">
       <div class="forecast-frenzy__intro-overlay"></div>
       <div class="forecast-frenzy__fade"></div>
-      <div id="producerManStart" class="forecast-frenzy__start" hidden>
-        <div class="forecast-frenzy__start-frame producer-man__start-frame">
-          <div id="producerManStartHost" class="forecast-frenzy__start-kicker">Production Minigame</div>
-          <div class="forecast-frenzy__start-title">Producer-Man</div>
-          <div class="forecast-frenzy__start-copy">
-            Run the studio floor, clear the tasks, and shove the disasters back off air.
-          </div>
-          <div class="forecast-frenzy__start-controls">Click Start or press Enter / Space</div>
-          <button id="producerManStartButton" type="button">Start</button>
-        </div>
-      </div>
 
       <div class="producer-man__cabinet">
-        <div class="producer-man__marquee">
+        <div class="producer-man__header">
           <div class="producer-man__title-group">
-            <div id="producerManHost" class="producer-man__kicker">Production Minigame</div>
-            <strong class="producer-man__title">Producer-Man</strong>
+            <div id="producerManHost" class="producer-man__kicker">Production Control Room</div>
+            <strong class="producer-man__title">Camera Cut</strong>
           </div>
           <div id="producerManIntroLine" class="producer-man__introline">
-            Run the floor, grab the fixes, and stop the disasters from eating the broadcast.
+            Switch the live hangar cameras on cue and make the show feel polished.
           </div>
           <button id="producerManExitButton" class="producer-man__exit" type="button">Exit</button>
         </div>
@@ -578,12 +570,20 @@
                   <strong id="producerManScore" class="producer-man__stat-value">0</strong>
                 </div>
                 <div class="producer-man__stat">
-                  <span class="producer-man__stat-label">Lives</span>
-                  <strong id="producerManLives" class="producer-man__stat-value">3</strong>
+                  <span class="producer-man__stat-label">Perfect</span>
+                  <strong id="producerManPerfect" class="producer-man__stat-value">0</strong>
                 </div>
                 <div class="producer-man__stat">
-                  <span class="producer-man__stat-label">Tasks Left</span>
-                  <strong id="producerManTasks" class="producer-man__stat-value">0</strong>
+                  <span class="producer-man__stat-label">Good</span>
+                  <strong id="producerManGood" class="producer-man__stat-value">0</strong>
+                </div>
+                <div class="producer-man__stat">
+                  <span class="producer-man__stat-label">Late</span>
+                  <strong id="producerManLate" class="producer-man__stat-value">0</strong>
+                </div>
+                <div class="producer-man__stat">
+                  <span class="producer-man__stat-label">Bad Cuts</span>
+                  <strong id="producerManMissed" class="producer-man__stat-value">0</strong>
                 </div>
                 <div class="producer-man__stat">
                   <span class="producer-man__stat-label">Time</span>
@@ -593,53 +593,81 @@
             </div>
 
             <div class="producer-man__panel">
-              <div class="producer-man__panel-label">Studio Status</div>
-              <div id="producerManStatus" class="producer-man__status-copy">On Air</div>
-              <div id="producerManLegend" class="producer-man__legend"></div>
-            </div>
-
-            <div class="producer-man__panel producer-man__controls">
-              <div class="producer-man__panel-label">Controls</div>
-              <p>Move with <code>WASD</code> or arrow keys.</p>
-              <p>Collect tasks for <strong>+10</strong>.</p>
-              <p>Emergency fixes score <strong>+50</strong> and stun the disasters.</p>
-              <p>Fix chained disasters for escalating combo points.</p>
+              <div class="producer-man__panel-label">Current Cue</div>
+              <div id="producerManCueState" class="producer-man__cue-state">Stand By</div>
+              <div id="producerManCuePrompt" class="producer-man__cue-prompt">Preview the camera bank</div>
+              <div id="producerManCueDetail" class="producer-man__cue-detail">
+                Use 1-4 to preview the requested angles, then start the show.
+              </div>
+              <div class="producer-man__cue-meter">
+                <div id="producerManCueMeterFill" class="producer-man__cue-meter-fill"></div>
+              </div>
             </div>
           </aside>
 
           <section class="producer-man__stage">
-            <div class="producer-man__stage-head">
-              <div class="producer-man__live-pill">LIVE FLOOR</div>
-              <div class="producer-man__stage-copy">
-                <strong>Rear hangar studio map</strong>
-                <span>Desk pods, stage, control bays, cameras, and cable lanes all route through one live floor plan.</span>
+            <div class="producer-man__feed-frame">
+              <div class="producer-man__feed-head">
+                <div id="producerManStatusPill" class="producer-man__status-pill" data-tone="standby">Ready</div>
+                <div id="producerManSelectedShot" class="producer-man__selected-shot">CAM 3 • Door Wide</div>
               </div>
-              <div id="producerManStatusPill" class="producer-man__status-pill" data-tone="live">Studio Live</div>
-            </div>
-
-            <div class="producer-man__frame">
-              <canvas
-                id="producerManCanvas"
-                class="producer-man__canvas"
-                width="960"
-                height="540"
-                aria-label="Producer-Man rear hangar studio map"
-              ></canvas>
+              <div class="producer-man__feed-lower">
+                <div class="producer-man__lower-third">
+                  <div id="producerManPromptMeta" class="producer-man__prompt-meta">Live Preview</div>
+                  <div id="producerManPrompt" class="producer-man__prompt">Start on the wide, then cut on the call.</div>
+                </div>
+              </div>
               <div id="producerManFeedback" class="producer-man__feedback" data-visible="false" data-tone="good"></div>
+              <div id="producerManStart" class="producer-man__start">
+                <div class="producer-man__start-card">
+                  <div id="producerManStartHost" class="producer-man__start-kicker">Production Switch Desk</div>
+                  <div class="producer-man__start-title">CAMERA CUT</div>
+                  <div class="producer-man__start-copy">
+                    You are live-switching the hangar show using the real room cameras. Hit the right camera in the timing window to keep the episode smooth.
+                  </div>
+                  <div class="producer-man__start-controls">1 TYLER  •  2 HOST  •  3 WIDE  •  4 REACTION</div>
+                  <button id="producerManStartButton" type="button">Start Show</button>
+                </div>
+              </div>
             </div>
 
-            <div id="producerManFooter" class="producer-man__footer">
-              Arrow keys or WASD move. Grab emergency fixes before the disasters box you in.
+            <div class="producer-man__timeline-shell">
+              <div class="producer-man__timeline-meta">
+                <span>Show Run</span>
+                <strong id="producerManTimelineLabel">0 / 14 landed</strong>
+              </div>
+              <div class="producer-man__timeline-track">
+                <div id="producerManTimelineProgress" class="producer-man__timeline-progress"></div>
+                <div id="producerManTimelineEvents" class="producer-man__timeline-events"></div>
+              </div>
             </div>
           </section>
+
+          <aside class="producer-man__sidebar producer-man__sidebar--right">
+            <div class="producer-man__panel">
+              <div class="producer-man__panel-label">Camera Bank</div>
+              <div id="producerManShotButtons" class="producer-man__shot-buttons"></div>
+            </div>
+
+            <div class="producer-man__panel">
+              <div class="producer-man__panel-label">Selected Angle</div>
+              <div id="producerManShotTitle" class="producer-man__shot-title">Door Wide</div>
+              <div id="producerManShotDescription" class="producer-man__shot-description">
+                High roof angle above the hangar entrance looking toward the circle table.
+              </div>
+              <div id="producerManFooter" class="producer-man__footer-copy">
+                Preview with 1-4. Enter or Space starts the show. Escape exits.
+              </div>
+            </div>
+          </aside>
         </div>
 
         <div id="producerManResult" class="forecast-frenzy__result" hidden>
           <div class="forecast-frenzy__result-card producer-man__result-card">
             <div class="forecast-frenzy__result-kicker">Broadcast Wrapped</div>
-            <h2 id="producerManResultRank" class="forecast-frenzy__result-rank">Associate Producer</h2>
+            <h2 id="producerManResultRank" class="forecast-frenzy__result-rank">Control Room Trainee</h2>
             <div id="producerManResultSummary" class="forecast-frenzy__result-summary">
-              Studio stabilized.
+              Score locked.
             </div>
             <div id="producerManResultStats" class="forecast-frenzy__result-stats"></div>
             <div class="forecast-frenzy__result-buttons">
@@ -721,6 +749,88 @@
             <div class="forecast-frenzy__result-buttons">
               <button id="jordiHeroReplayButton" type="button">Replay</button>
               <button id="jordiHeroExitButton" type="button">Exit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="brandonStack" class="forecast-frenzy brandon-stack forecast-frenzy--hidden" aria-hidden="true">
+      <div class="forecast-frenzy__intro-overlay"></div>
+      <div class="forecast-frenzy__fade"></div>
+      <div class="forecast-frenzy__flash"></div>
+
+      <div class="brandon-stack__cabinet">
+        <header class="brandon-stack__header">
+          <div class="brandon-stack__title-group">
+            <div class="brandon-stack__kicker">Brandon's Minigame</div>
+            <strong class="brandon-stack__title">Substack Stack</strong>
+          </div>
+          <div id="brandonStackIntroLine" class="brandon-stack__introline">
+            Stack Brandon's article slices into one publishable draft.
+          </div>
+          <button id="brandonStackExitButton" class="brandon-stack__exit" type="button">Exit</button>
+        </header>
+
+        <div class="brandon-stack__workspace">
+          <aside class="brandon-stack__sidebar">
+            <div class="brandon-stack__stats">
+              <div class="brandon-stack__stat">
+                <span class="brandon-stack__stat-label">Slices</span>
+                <strong id="brandonStackRound" class="brandon-stack__stat-value">0 / 10</strong>
+              </div>
+              <div class="brandon-stack__stat">
+                <span class="brandon-stack__stat-label">Width</span>
+                <strong id="brandonStackWidth" class="brandon-stack__stat-value">100%</strong>
+              </div>
+              <div class="brandon-stack__stat">
+                <span class="brandon-stack__stat-label">Quality</span>
+                <strong id="brandonStackQuality" class="brandon-stack__stat-value">Clean draft</strong>
+              </div>
+            </div>
+            <div class="brandon-stack__note">
+              Each run uses one real Substack page, cut into ten contiguous slices from bottom to top. The active strip rides directly on the stack so the final page stays clean.
+            </div>
+          </aside>
+
+          <div class="brandon-stack__editor-shell">
+            <canvas
+              id="brandonStackCanvas"
+              class="brandon-stack__canvas"
+              width="1280"
+              height="1400"
+              aria-label="Brandon Substack stacking game"
+            ></canvas>
+            <div id="brandonStackFeedback" class="brandon-stack__feedback" data-visible="false"></div>
+            <div id="brandonStackStart" class="brandon-stack__start">
+              <div class="brandon-stack__start-card">
+                <div class="brandon-stack__start-kicker">Draft Builder</div>
+                <h2 class="brandon-stack__start-title">Stack The Screenshot Strips</h2>
+                <p class="brandon-stack__start-copy">
+                  Real Substack slices sweep across the page. Drop them clean to keep Brandon's draft wide. Miss the stack once and the post is over.
+                </p>
+                <button id="brandonStackStartButton" type="button">Start Draft</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="brandonStackFooter" class="brandon-stack__footer">
+          Space drops the moving slice.
+        </div>
+
+        <div id="brandonStackResult" class="forecast-frenzy__result" hidden>
+          <div class="brandon-stack__result-card">
+            <div class="brandon-stack__result-kicker">Substack Metrics</div>
+            <h2 id="brandonStackResultTitle" class="brandon-stack__result-title">Draft Survived</h2>
+            <div id="brandonStackResultSummary" class="brandon-stack__result-summary">
+              Brandon kept the page clean.
+            </div>
+            <div id="brandonStackResultMetrics" class="brandon-stack__result-metrics"></div>
+            <div id="brandonStackResultChips" class="brandon-stack__result-chips"></div>
+            <div class="forecast-frenzy__result-buttons">
+              <button id="brandonStackReplayButton" type="button">Write Again</button>
+              <button id="brandonStackResultExitButton" type="button">Exit</button>
             </div>
           </div>
         </div>

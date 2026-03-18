@@ -8,6 +8,7 @@ import { NikChiefOfStaffOverlay } from "./chief-of-staff.js";
 import { ForecastFrenzyGame } from "./forecast-frenzy.js";
 import { JordiSoundboardHeroOverlay } from "./jordi-soundboard-hero.js";
 import { ProducerManOverlay } from "./producer-man.js";
+import { BrandonStackOverlay } from "./brandon-stack.js";
 import { TylerBoardOverlay } from "./tyler-board.js";
 
 const FLOOR_THICKNESS = 0.08;
@@ -33,6 +34,7 @@ const PLAYER_HEIGHT = 1.8;
 const PLAYER_RADIUS = 0.24;
 const POINTER_LOOK_SENSITIVITY = 0.0022;
 const PLAYER_MAX_PITCH = Math.PI * 0.35;
+const DEFAULT_CAMERA_FOV = 68;
 const THIRD_PERSON_CAMERA_DISTANCE = 4.1;
 const THIRD_PERSON_CAMERA_HEIGHT = 1.15;
 const THIRD_PERSON_TARGET_DROP = 0.18;
@@ -125,6 +127,23 @@ const NEW_ROOM_ROOF_NORTH_SETBACK = INNER_WALL_THICKNESS / 2 + 0.02;
 const NEW_ROOM_AREA = `${((HANGAR_INNER_EAST_X - RIGHT_STACK_X) * (PLAN_DEPTH - OTHER3_BOTTOM)).toFixed(1)} m²`;
 const HORSE_STATUE_MODEL_URL = new URL("./scene.gltf", import.meta.url).href;
 const HORSE_STATUE_GROUND_OFFSET = 0.12;
+const GOALPOST_SCALE = 0.58;
+const GOALPOST_STEM_RADIUS = 0.07 * GOALPOST_SCALE;
+const GOALPOST_STEM_HEIGHT = 3.05 * GOALPOST_SCALE - (0.12 * GOALPOST_SCALE) / 2;
+const GOALPOST_FOOTPRINT = 0.78 * GOALPOST_SCALE;
+const GOALPOST_COLLIDER_PADDING = PLAYER_RADIUS * 0.04;
+const GOALPOST_INTERACTION_HEIGHT = 1.15;
+const GOALPOST_PROMPT_RADIUS = 2.35;
+const GOALPOST_PROMPT_OFFSET_Y = 1.55;
+const GOALPOST_PLACEMENT_SAMPLE_INSET = 0.06;
+const GOALPOST_PLAYER_CLEARANCE = GOALPOST_FOOTPRINT / 2 + PLAYER_RADIUS + 0.16;
+const GOALPOST_ARM_REACH = 0.74;
+const GOALPOST_HOLD_FORWARD_FIRST_PERSON = 1.28;
+const GOALPOST_HOLD_SIDE_FIRST_PERSON = 0.94;
+const GOALPOST_HOLD_VERTICAL_FIRST_PERSON = -1.24;
+const GOALPOST_HOLD_BASE_HEIGHT_THIRD_PERSON = 0.28;
+const GOALPOST_HOLD_TILT_X = -0.08;
+const GOALPOST_HOLD_TILT_Z = -0.16;
 
 const gltfLoader = new GLTFLoader();
 const horseStatueMaterial = new THREE.MeshStandardMaterial({
@@ -465,9 +484,87 @@ const maxClipperRoot = document.querySelector("#maxClipper");
 const johnSponsorReadRoot = document.querySelector("#johnSponsorRead");
 const producerManRoot = document.querySelector("#producerMan");
 const jordiHeroRoot = document.querySelector("#jordiHero");
-const coordX = document.querySelector("#coordX");
-const coordY = document.querySelector("#coordY");
-const coordZ = document.querySelector("#coordZ");
+const brandonStackRoot = document.querySelector("#brandonStack");
+const subscribersHud = document.querySelector("#subscribersHud");
+const subscribersHudCount = document.querySelector("#subscribersHudCount");
+const subscribersHudDelta = document.querySelector("#subscribersHudDelta");
+const SUBSCRIBERS_START = 50000;
+const SUBSCRIBERS_SWING = 1000;
+const SUBSCRIBERS_STEP = 50;
+const SUBSCRIBERS_GAIN_THRESHOLD = 0.62;
+let subscriberCount = SUBSCRIBERS_START;
+let lastSubscriberDelta = 0;
+let hasSubscriberOutcome = false;
+const PRODUCER_MAN_CAMERA_SHOTS = {
+  host: {
+    positionPlan: [9.4, 25.0],
+    positionY: 1.72,
+    targetPlan: [10.0, 22.5],
+    targetY: 1.42,
+    fov: 44,
+    drift: {
+      x: 0.08,
+      y: 0.03,
+      z: 0.05,
+      targetX: 0.04,
+      targetY: 0.03,
+      targetZ: 0.03,
+      speed: 0.54,
+      phase: 0.25,
+    },
+  },
+  guest: {
+    positionPlan: [6.5, 34.55],
+    positionY: 1.72,
+    targetPlan: [6.5, 30.08],
+    targetY: 1.58,
+    fov: 40,
+    drift: {
+      x: 0.08,
+      y: 0.03,
+      z: 0.05,
+      targetX: 0.05,
+      targetY: 0.03,
+      targetZ: 0.04,
+      speed: 0.5,
+      phase: 0.92,
+    },
+  },
+  wide: {
+    positionPlan: [11.8, 12.25],
+    positionY: 4.9,
+    targetPlan: [6.5, 30.05],
+    targetY: 1.66,
+    fov: 44,
+    drift: {
+      x: 0.12,
+      y: 0.04,
+      z: 0.08,
+      targetX: 0.12,
+      targetY: 0.05,
+      targetZ: 0.08,
+      speed: 0.26,
+      phase: 1.38,
+    },
+  },
+  reaction: {
+    positionPlan: [1.85, 14.86],
+    positionY: 2.85,
+    targetPlan: [6.3, 14.86],
+    targetY: 1.6,
+    fov: 46,
+    drift: {
+      x: 0.08,
+      y: 0.05,
+      z: 0.09,
+      targetX: 0.1,
+      targetY: 0.04,
+      targetZ: 0.06,
+      speed: 0.38,
+      phase: 2.08,
+    },
+  },
+};
 
 const renderer = new THREE.WebGLRenderer({
   antialias: true,
@@ -485,7 +582,7 @@ scene.background = new THREE.Color("#959a94");
 scene.fog = null;
 
 const camera = new THREE.PerspectiveCamera(
-  68,
+  DEFAULT_CAMERA_FOV,
   window.innerWidth / window.innerHeight,
   0.1,
   120,
@@ -509,11 +606,33 @@ const walkLookTarget = new THREE.Vector3(
 );
 const cameraCollisionRaycaster = new THREE.Raycaster();
 cameraCollisionRaycaster.layers.enable(HANGAR_LIGHTING_LAYER);
+const goalpostPlacementRaycaster = new THREE.Raycaster();
+const goalpostPlacementPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const cameraLookTarget = new THREE.Vector3();
 const desiredCameraPosition = new THREE.Vector3();
 const cameraOffsetVector = new THREE.Vector3();
 const cameraForwardVector = new THREE.Vector3();
 const cameraDirectionVector = new THREE.Vector3();
+const producerManShotPosition = new THREE.Vector3();
+const producerManShotTarget = new THREE.Vector3();
+const goalpostPlacementTarget = new THREE.Vector3();
+const goalpostPlacementDirection = new THREE.Vector3();
+const goalpostPlacementNdc = new THREE.Vector2(0, 0);
+const goalpostLeftGripLocal = new THREE.Vector3(-GOALPOST_STEM_RADIUS, GOALPOST_STEM_HEIGHT / 2, 0);
+const goalpostRightGripLocal = new THREE.Vector3(GOALPOST_STEM_RADIUS, GOALPOST_STEM_HEIGHT / 2, 0);
+const goalpostGripCenterLocal = new THREE.Vector3(0, GOALPOST_STEM_HEIGHT / 2, 0);
+const goalpostHoldForward = new THREE.Vector3();
+const goalpostHoldRight = new THREE.Vector3();
+const goalpostHoldPosition = new THREE.Vector3();
+const goalpostCarryLeftTarget = new THREE.Vector3();
+const goalpostCarryRightTarget = new THREE.Vector3();
+const goalpostCarryMidpoint = new THREE.Vector3();
+const goalpostCarryGripCenter = new THREE.Vector3();
+const goalpostCarryLeftGripWorld = new THREE.Vector3();
+const goalpostCarryRightGripWorld = new THREE.Vector3();
+const goalpostCarryTargetLocal = new THREE.Vector3();
+const goalpostCarryRotationEuler = new THREE.Euler(0, 0, 0, "XYZ");
+const goalpostCarryQuaternion = new THREE.Quaternion();
 const lookEuler = new THREE.Euler(0, 0, 0, "YXZ");
 let isPointerLocked = false;
 let walkHudJumpActive = false;
@@ -548,11 +667,35 @@ const state = {
   sprint: false,
   velocityY: 0,
   seatedSeat: null,
+  carriedGoalpost: null,
 };
 
 const clock = new THREE.Clock();
 const footstepState = { distance: 0, stride: 0.55 };
 let footstepAudioContext = null;
+
+let bgMusic = null;
+let bgMusicMuted = false;
+function startBackgroundMusic() {
+  return; // Audio disabled for now
+  // if (bgMusic) return;
+  // bgMusic = new Audio(new URL("./Space Invaders - Space Invaders 4.mp3", import.meta.url).href + "?v=1");
+  // bgMusic.loop = true;
+  // bgMusic.volume = 0.1;
+  // bgMusic.currentTime = 10;
+  // bgMusic.play().catch(() => {});
+}
+function toggleBgMusicMute() {
+  if (!bgMusic) return;
+  bgMusicMuted = !bgMusicMuted;
+  bgMusic.muted = bgMusicMuted;
+  const btn = document.querySelector("#muteButton");
+  if (btn) {
+    btn.textContent = bgMusicMuted ? "🔇" : "🔊";
+    btn.title = bgMusicMuted ? "Unmute music (M)" : "Mute music (M)";
+    btn.setAttribute("aria-label", bgMusicMuted ? "Unmute background music (M)" : "Mute background music (M)");
+  }
+}
 
 function playFootstep() {
   if (!footstepAudioContext) {
@@ -590,37 +733,115 @@ const interactiveDoors = [];
 const interactiveSeats = [];
 const interactiveNpcs = [];
 const interactiveGongs = [];
+const interactiveGoalposts = [];
 const gongHitAnimations = [];
 const mirrorDistanceLods = [];
 const slidingShelfCameras = [];
 const npcPromptWorldPosition = new THREE.Vector3();
+
+function formatSubscriberCount(value) {
+  return Math.max(0, Math.round(value)).toLocaleString();
+}
+
+function formatSignedSubscriberCount(value) {
+  const rounded = Math.round(value);
+  if (rounded === 0) {
+    return "0";
+  }
+  return `${rounded > 0 ? "+" : "-"}${Math.abs(rounded).toLocaleString()}`;
+}
+
+function syncSubscribersHud() {
+  if (subscribersHudCount) {
+    subscribersHudCount.textContent = formatSubscriberCount(subscriberCount);
+  }
+  if (subscribersHudDelta) {
+    subscribersHudDelta.textContent =
+      !hasSubscriberOutcome
+        ? "Session base"
+        : lastSubscriberDelta === 0
+        ? "No change last run"
+        : `Last run ${formatSignedSubscriberCount(lastSubscriberDelta)}`;
+  }
+  if (subscribersHud) {
+    subscribersHud.dataset.trend =
+      lastSubscriberDelta > 0 ? "up" : lastSubscriberDelta < 0 ? "down" : "flat";
+  }
+}
+
+function handleSubscribersRunOutcome({ performance } = {}) {
+  const normalizedPerformance = clamp(performance ?? 0.5, 0, 1);
+  const adjustedPerformance = clamp(
+    (normalizedPerformance - SUBSCRIBERS_GAIN_THRESHOLD) / (1 - SUBSCRIBERS_GAIN_THRESHOLD),
+    -1,
+    1,
+  );
+  const rawDelta = adjustedPerformance * SUBSCRIBERS_SWING;
+  const roundedDelta = Math.round(rawDelta / SUBSCRIBERS_STEP) * SUBSCRIBERS_STEP;
+  const nextCount = Math.max(0, subscriberCount + roundedDelta);
+  const appliedDelta = nextCount - subscriberCount;
+
+  subscriberCount = nextCount;
+  lastSubscriberDelta = appliedDelta;
+  hasSubscriberOutcome = true;
+  syncSubscribersHud();
+
+  return {
+    total: subscriberCount,
+    totalText: `Subscribers ${formatSubscriberCount(subscriberCount)}`,
+    totalCountText: formatSubscriberCount(subscriberCount),
+    delta: appliedDelta,
+    shortDeltaText: formatSignedSubscriberCount(appliedDelta),
+    deltaText:
+      appliedDelta === 0
+        ? "No subscriber change"
+        : `Net ${formatSignedSubscriberCount(appliedDelta)} subscribers`,
+    deltaChipText: appliedDelta === 0 ? "Net flat" : `Net ${formatSignedSubscriberCount(appliedDelta)}`,
+    trend: appliedDelta > 0 ? "up" : appliedDelta < 0 ? "down" : "flat",
+  };
+}
+
+syncSubscribersHud();
+
 const forecastFrenzy = new ForecastFrenzyGame({
   root: forecastFrenzyRoot,
   onExit: handleForecastFrenzyExit,
+  onRunComplete: handleSubscribersRunOutcome,
 });
 const tylerBoard = new TylerBoardOverlay({
   root: tylerBoardRoot,
   onExit: handleTylerBoardExit,
+  onRunComplete: handleSubscribersRunOutcome,
 });
 const nikChiefOfStaff = new NikChiefOfStaffOverlay({
   root: nikChiefOfStaffRoot,
   onExit: handleNikChiefOfStaffExit,
+  onRunComplete: handleSubscribersRunOutcome,
 });
 const maxClipper = new MaxClipperOverlay({
   root: maxClipperRoot,
   onExit: handleMaxClipperExit,
+  onRunComplete: handleSubscribersRunOutcome,
 });
 const johnSponsorRead = new JohnSponsorReadOverlay({
   root: johnSponsorReadRoot,
   onExit: handleJohnSponsorReadExit,
+  onRunComplete: handleSubscribersRunOutcome,
 });
 const producerMan = new ProducerManOverlay({
   root: producerManRoot,
   onExit: handleProducerManExit,
+  onRunComplete: handleSubscribersRunOutcome,
 });
 const jordiHero = new JordiSoundboardHeroOverlay({
   root: jordiHeroRoot,
   onExit: handleJordiHeroExit,
+  onRunComplete: handleSubscribersRunOutcome,
+});
+const brandonStack = new BrandonStackOverlay({
+  root: brandonStackRoot,
+  onExit: handleBrandonStackExit,
+  onRunComplete: handleSubscribersRunOutcome,
 });
 
 const architectureGroup = new THREE.Group();
@@ -640,6 +861,27 @@ removeFrontRoomCeilingIntrusions();
 buildLighting();
 syncPlayerPresentation(0, 0);
 
+const startBgMusicOnInteraction = () => {
+  startBackgroundMusic();
+  canvas.removeEventListener("click", startBgMusicOnInteraction);
+  document.removeEventListener("keydown", startBgMusicOnInteraction);
+};
+canvas.addEventListener("click", startBgMusicOnInteraction);
+document.addEventListener("keydown", startBgMusicOnInteraction);
+const muteButton = document.querySelector("#muteButton");
+if (muteButton) {
+  muteButton.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (bgMusic) {
+      toggleBgMusicMute();
+    } else {
+      startBackgroundMusic();
+      canvas.removeEventListener("click", startBgMusicOnInteraction);
+      document.removeEventListener("keydown", startBgMusicOnInteraction);
+      if (bgMusic) muteButton.textContent = "🔊";
+    }
+  });
+}
 canvas.addEventListener("click", maybeLockWalkthrough);
 document.addEventListener("pointerlockchange", onPointerLockChange);
 document.addEventListener("mousemove", onPointerMove);
@@ -1970,11 +2212,11 @@ function registerMaxClipperNpc(character, {
 
 function registerProducerManNpc(character, {
   promptEyebrow = "Production",
-  promptTitle = "Press E to produce",
+  promptTitle = "Press E to cut cameras",
   lines = [
-    "The floor is melting down. Keep the stream alive.",
-    "Clear the fixes before the disasters corner you.",
-    "This is Pac-Man if Pac-Man had to run a live show.",
+    "Run Camera Cut and switch the hangar shots live.",
+    "Host, guest, wide, reaction. Land the cut on the cue.",
+    "Wrong timing makes the show look cheap.",
   ],
   promptRadius = 1.8,
 } = {}) {
@@ -2017,6 +2259,39 @@ function registerJordiHeroNpc(character, {
 
   interactiveNpcs.push({
     type: "jordiHero",
+    promptEyebrow,
+    promptTitle,
+    lines,
+    promptRadius,
+    avatar: character,
+    interactionPoint: character.interactionPoint,
+    promptAnchor: character.head,
+    promptOffsetY: 0.42,
+    baseRootY: character.root.position.y,
+    baseHeadRotationX: character.head.rotation.x,
+    baseHeadRotationY: character.head.rotation.y,
+    baseLeftArmX: character.leftArmPivot.rotation.x,
+    baseRightArmX: character.rightArmPivot.rotation.x,
+    phaseOffset: Math.random() * Math.PI * 2,
+  });
+}
+
+function registerBrandonStackNpc(character, {
+  promptEyebrow = "Brandon",
+  promptTitle = "Press E to stack the post",
+  lines = [
+    "Stack the Substack slices clean and keep the article full-width.",
+    "Drop the moving strip on time or the draft gets chopped down.",
+    "This is a timing game. No typing. Just publish or miss.",
+  ],
+  promptRadius = 1.8,
+} = {}) {
+  if (!character) {
+    return;
+  }
+
+  interactiveNpcs.push({
+    type: "brandonStack",
     promptEyebrow,
     promptTitle,
     lines,
@@ -5262,11 +5537,11 @@ function addP3aStorageShelf() {
     placeTableProp(phone, phonePos, faceCenterRotation(phonePos, 0.18));
 
     [
-      { angle: 108, color: "#7b1d2e", accent: "#f0f0ef", rotation: 0.08 },
-      { angle: 138, color: "#8db33f", accent: "#ece9d9", rotation: -0.12 },
-      { angle: 168, color: "#a72b39", accent: "#efe6e6", rotation: 0.04 },
-      { angle: 198, color: "#a72b39", accent: "#efe6e6", rotation: -0.02 },
-      { angle: 28, color: "#b4b7bc", accent: "#d94949", rotation: 0.1 },
+      { angle: 288, color: "#7b1d2e", accent: "#f0f0ef", rotation: 0.08 },
+      { angle: 318, color: "#8db33f", accent: "#ece9d9", rotation: -0.12 },
+      { angle: 348, color: "#a72b39", accent: "#efe6e6", rotation: 0.04 },
+      { angle: 18, color: "#a72b39", accent: "#efe6e6", rotation: -0.02 },
+      { angle: 208, color: "#b4b7bc", accent: "#d94949", rotation: 0.1 },
     ].forEach(({ angle, color, accent, rotation }) => {
       addCan(ringPosition(angle, 0.76), color, accent, rotation);
     });
@@ -7127,11 +7402,11 @@ function addP3aStorageShelf() {
   if (scott) {
     registerProducerManNpc(scott, {
       promptEyebrow: "Scott",
-      promptTitle: "Press E to produce",
+      promptTitle: "Press E to cut cameras",
       lines: [
-        "Mic checks, framing, WiFi, all of it is on fire.",
-        "Run the floor and keep the episode on the rails.",
-        "Producer-Man is the job description.",
+        "Scott needs the live switches clean.",
+        "Use the real hangar camera angles and cut on time.",
+        "The episode only feels premium if the timing is sharp.",
       ],
     });
   }
@@ -7247,10 +7522,14 @@ function addP3aStorageShelf() {
     shirtColor: "#f3efe6",
   });
   if (brandon) {
-    registerChatNpc(brandon, {
+    registerBrandonStackNpc(brandon, {
       promptEyebrow: "Brandon",
-      promptTitle: "Press E to talk",
-      lines: ["Hey.", "What's up?", "Busy with the desk."],
+      promptTitle: "Press E to stack the post",
+      lines: [
+        "Stack the Substack slices clean and keep Brandon's page publishable.",
+        "Every drop trims the article if you're off. Miss it and the draft dies.",
+        "No typing. Just timing. Build the cleanest Brandon post you can.",
+      ],
     });
   }
   const hangarStageCenter = [6.5, 30.0];
@@ -7915,11 +8194,11 @@ function addP3aStorageShelf() {
   if (ben) {
     registerProducerManNpc(ben, {
       promptEyebrow: "Ben",
-      promptTitle: "Press E to produce",
+      promptTitle: "Press E to cut cameras",
       lines: [
-        "The studio is chaos. Go save the segment.",
-        "Clear every production task before the problems swarm you.",
-        "You are now Producer-Man.",
+        "Ben wants the switcher to feel locked in.",
+        "Hit host, guest, wide, and producer reaction at the right beat.",
+        "Late cuts turn a clean segment into cable access.",
       ],
     });
   }
@@ -7944,11 +8223,11 @@ function addP3aStorageShelf() {
   if (michael) {
     registerProducerManNpc(michael, {
       promptEyebrow: "Michael",
-      promptTitle: "Press E to produce",
+      promptTitle: "Press E to cut cameras",
       lines: [
-        "The control room is good until it absolutely is not.",
-        "Reset the disasters and stabilize the episode.",
-        "Get the stream home without crashing it.",
+        "Michael is calling a live multicam show.",
+        "Punch the right hangar shot inside the timing window.",
+        "Keep the broadcast smooth or eat the bad cut.",
       ],
     });
   }
@@ -9684,7 +9963,7 @@ function addHangarBasketballHoop() {
 
 function addFootballGoalpost(center, rotation = 0) {
   const goalpost = new THREE.Group();
-  const scale = 0.58;
+  const scale = GOALPOST_SCALE;
   const postMaterial = new THREE.MeshStandardMaterial({
     color: "#f4c51d",
     roughness: 0.52,
@@ -9732,7 +10011,7 @@ function addFootballGoalpost(center, rotation = 0) {
 
   enableShadows(goalpost);
   placePlanObject(goalpost, center, 0, rotation, furnishingGroup);
-  pushPlanRectCollider(center, 0.78 * scale, 0.78 * scale, rotation, PLAYER_RADIUS * 0.04);
+  registerInteractiveGoalpost(goalpost);
 }
 
 function addRollingChair(center, rotation = 0, { registerAsSeat = true, standOffset = 0.8 } = {}) {
@@ -10015,6 +10294,175 @@ function placePlanObject(object, center, y = 0, rotation = 0, group = furnishing
   object.rotation.y = rotation;
   group.add(object);
   return object;
+}
+
+function registerInteractiveGoalpost(object) {
+  const goalpost = {
+    object,
+    interactionPoint: new THREE.Vector3(),
+    promptAnchor: object,
+    promptOffsetY: GOALPOST_PROMPT_OFFSET_Y,
+    promptRadius: GOALPOST_PROMPT_RADIUS,
+    colliderRectIndex: null,
+    isCarried: false,
+    canDrop: false,
+    previewPosition: object.position.clone(),
+    heldPosition: object.position.clone(),
+    lastPlacedPosition: object.position.clone(),
+    lastValidPreviewPosition: object.position.clone(),
+    lastPlacedRotation: object.rotation.y,
+  };
+
+  interactiveGoalposts.push(goalpost);
+  setGoalpostPlacement(goalpost, object.position, object.rotation.y, { commit: true });
+  return goalpost;
+}
+
+function buildGoalpostColliderRect(position, rotation) {
+  return axisAlignedBoundsForRotatedRect(
+    { x: position.x, z: position.z },
+    GOALPOST_FOOTPRINT,
+    GOALPOST_FOOTPRINT,
+    rotation,
+    GOALPOST_COLLIDER_PADDING,
+  );
+}
+
+function updateGoalpostInteractionPoint(goalpost) {
+  goalpost.interactionPoint.set(
+    goalpost.object.position.x,
+    GOALPOST_INTERACTION_HEIGHT,
+    goalpost.object.position.z,
+  );
+}
+
+function syncGoalpostCollider(goalpost) {
+  const rect = buildGoalpostColliderRect(goalpost.object.position, goalpost.object.rotation.y);
+  if (Number.isInteger(goalpost.colliderRectIndex)) {
+    furnitureRects[goalpost.colliderRectIndex] = rect;
+    return;
+  }
+  goalpost.colliderRectIndex = furnitureRects.push(rect) - 1;
+}
+
+function setGoalpostColliderEnabled(goalpost, enabled) {
+  if (!Number.isInteger(goalpost.colliderRectIndex)) {
+    if (enabled) {
+      syncGoalpostCollider(goalpost);
+    }
+    return;
+  }
+
+  furnitureRects[goalpost.colliderRectIndex] = enabled
+    ? buildGoalpostColliderRect(goalpost.object.position, goalpost.object.rotation.y)
+    : null;
+}
+
+function setGoalpostPlacement(goalpost, worldCenter, rotation = goalpost.object.rotation.y, { commit = false } = {}) {
+  goalpost.object.position.set(worldCenter.x, 0, worldCenter.z);
+  goalpost.object.rotation.x = 0;
+  goalpost.object.rotation.y = rotation;
+  goalpost.object.rotation.z = 0;
+  goalpost.previewPosition.copy(worldCenter);
+  updateGoalpostInteractionPoint(goalpost);
+
+  if (commit) {
+    goalpost.lastPlacedPosition.copy(worldCenter);
+    goalpost.lastValidPreviewPosition.copy(worldCenter);
+    goalpost.lastPlacedRotation = rotation;
+  }
+
+  if (!goalpost.isCarried) {
+    syncGoalpostCollider(goalpost);
+  }
+}
+
+function setArmPoseToWorldTarget(armPivot, targetWorld) {
+  goalpostCarryTargetLocal.copy(targetWorld);
+  playerAvatar.root.worldToLocal(goalpostCarryTargetLocal);
+  goalpostCarryTargetLocal.sub(armPivot.position);
+
+  const targetLength = goalpostCarryTargetLocal.length();
+  if (targetLength <= 0.0001) {
+    armPivot.rotation.x = 0;
+    armPivot.rotation.y = 0;
+    armPivot.rotation.z = 0;
+    return;
+  }
+
+  goalpostCarryTargetLocal.divideScalar(targetLength);
+  armPivot.rotation.x = Math.atan2(-goalpostCarryTargetLocal.z, -goalpostCarryTargetLocal.y);
+  armPivot.rotation.y = 0;
+  armPivot.rotation.z = Math.asin(clamp(goalpostCarryTargetLocal.x, -1, 1));
+}
+
+function setThirdPersonGoalpostCarryPose(goalpost) {
+  const carryYaw = playerAvatar.root.rotation.y;
+  goalpostHoldForward.set(-Math.sin(carryYaw), 0, -Math.cos(carryYaw));
+  goalpostHoldRight.set(-goalpostHoldForward.z, 0, goalpostHoldForward.x).normalize();
+
+  goalpostCarryLeftTarget.copy(playerAvatar.leftArmPivot.position);
+  playerAvatar.root.localToWorld(goalpostCarryLeftTarget);
+  goalpostCarryRightTarget.copy(playerAvatar.rightArmPivot.position);
+  playerAvatar.root.localToWorld(goalpostCarryRightTarget);
+
+  goalpostCarryMidpoint.copy(goalpostCarryLeftTarget).add(goalpostCarryRightTarget).multiplyScalar(0.5);
+
+  goalpostCarryRotationEuler.set(GOALPOST_HOLD_TILT_X, carryYaw, 0);
+  goalpostCarryQuaternion.setFromEuler(goalpostCarryRotationEuler);
+  goalpostCarryGripCenter.copy(goalpostGripCenterLocal).applyQuaternion(goalpostCarryQuaternion);
+
+  const lateralReach = Math.max(
+    0,
+    Math.abs(playerAvatar.rightArmPivot.position.x - playerAvatar.leftArmPivot.position.x) / 2 - GOALPOST_STEM_RADIUS,
+  );
+  const verticalReach = goalpostCarryGripCenter.y + GOALPOST_HOLD_BASE_HEIGHT_THIRD_PERSON - goalpostCarryMidpoint.y;
+  const forwardReach = Math.sqrt(
+    Math.max(
+      0,
+      GOALPOST_ARM_REACH * GOALPOST_ARM_REACH
+        - lateralReach * lateralReach
+        - verticalReach * verticalReach,
+    ),
+  );
+
+  goalpostHoldPosition.copy(goalpostCarryMidpoint);
+  goalpostHoldPosition.y = GOALPOST_HOLD_BASE_HEIGHT_THIRD_PERSON + goalpostCarryGripCenter.y;
+  goalpostHoldPosition.addScaledVector(goalpostHoldForward, forwardReach);
+
+  goalpost.object.position.copy(goalpostHoldPosition).sub(goalpostCarryGripCenter);
+  goalpost.object.rotation.copy(goalpostCarryRotationEuler);
+  goalpost.heldPosition.copy(goalpost.object.position);
+
+  goalpostCarryLeftGripWorld.copy(goalpostLeftGripLocal).applyQuaternion(goalpostCarryQuaternion).add(goalpost.object.position);
+  goalpostCarryRightGripWorld.copy(goalpostRightGripLocal).applyQuaternion(goalpostCarryQuaternion).add(goalpost.object.position);
+
+  setArmPoseToWorldTarget(playerAvatar.leftArmPivot, goalpostCarryLeftGripWorld);
+  setArmPoseToWorldTarget(playerAvatar.rightArmPivot, goalpostCarryRightGripWorld);
+  updateGoalpostInteractionPoint(goalpost);
+}
+
+function setGoalpostCarryPose(goalpost) {
+  if (state.walkView === "firstPerson") {
+    getLookDirection(playerState.yaw, playerState.pitch, goalpostHoldForward);
+    goalpostHoldRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
+    goalpostHoldPosition.copy(camera.position)
+      .addScaledVector(goalpostHoldForward, GOALPOST_HOLD_FORWARD_FIRST_PERSON)
+      .addScaledVector(goalpostHoldRight, GOALPOST_HOLD_SIDE_FIRST_PERSON);
+    goalpostHoldPosition.y += GOALPOST_HOLD_VERTICAL_FIRST_PERSON;
+  } else {
+    setThirdPersonGoalpostCarryPose(goalpost);
+    return;
+  }
+
+  goalpost.object.position.copy(goalpostHoldPosition);
+  goalpost.object.rotation.set(
+    GOALPOST_HOLD_TILT_X,
+    playerState.facingYaw,
+    GOALPOST_HOLD_TILT_Z,
+  );
+  goalpost.heldPosition.copy(goalpostHoldPosition);
+  updateGoalpostInteractionPoint(goalpost);
 }
 
 function registerSeat(
@@ -11457,6 +11905,186 @@ function finalizeHorseStatuePlacement(statue, sculptureBounds = null) {
   });
 }
 
+function getGoalpostPlacementTarget(target = new THREE.Vector3()) {
+  getFlatLookDirection(playerState.facingYaw, goalpostPlacementDirection);
+  return target
+    .copy(playerState.position)
+    .addScaledVector(goalpostPlacementDirection, GOALPOST_PLAYER_CLEARANCE)
+    .setY(0);
+}
+
+function isPointInAccessibleArea(point) {
+  const dist = Math.sqrt(point.x * point.x + point.y * point.y);
+  if (dist > PLAZA_RADIUS) {
+    return false;
+  }
+
+  const room = worldRooms.find((candidate) => pointInPolygon({ x: point.x, z: point.y }, candidate.worldPoints));
+  const o5ExteriorLot = [
+    toWorldPoint([-6.0, FRONT_EDGE_Z - 6.0]),
+    toWorldPoint([OTHER5_RIGHT + 3.0, FRONT_EDGE_Z - 6.0]),
+    toWorldPoint([OTHER5_RIGHT + 3.0, OTHER5_DEPTH + 1.8]),
+    toWorldPoint([OTHER5_LEFT + 0.18, OTHER5_DEPTH + 1.8]),
+    toWorldPoint([OTHER5_LEFT + 0.18, LEFT_ROOM_DEPTH + 4.0]),
+    toWorldPoint([-6.0, LEFT_ROOM_DEPTH + 4.0]),
+  ];
+  const inO5Exterior = pointInPolygon({ x: point.x, z: point.y }, o5ExteriorLot);
+  if (!room && !inO5Exterior) {
+    return false;
+  }
+
+  const frontDoorWorldZLimit = toWorldPoint([0, OTHER5_DEPTH - 0.5]).z;
+  const frontDoorWorldXMin = toWorldPoint([OTHER5_LEFT, 0]).x;
+  const frontDoorWorldXMax = toWorldPoint([OTHER5_RIGHT, 0]).x;
+  if (
+    inO5Exterior &&
+    point.x >= frontDoorWorldXMin &&
+    point.x <= frontDoorWorldXMax &&
+    point.y < frontDoorWorldZLimit
+  ) {
+    return false;
+  }
+
+  if (
+    room &&
+    (room.id === "newRoom" || room.id === "hangarBay") &&
+    hangarInnerHeightAtWorldX(point.x) <= PLAYER_HEIGHT + 0.1
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function isGoalpostPlacementValid(goalpost, position, rotation = goalpost.object.rotation.y) {
+  const rect = buildGoalpostColliderRect(position, rotation);
+  const samplePoints = [
+    { x: position.x, y: position.z },
+    { x: rect.minX + GOALPOST_PLACEMENT_SAMPLE_INSET, y: rect.minZ + GOALPOST_PLACEMENT_SAMPLE_INSET },
+    { x: rect.maxX - GOALPOST_PLACEMENT_SAMPLE_INSET, y: rect.minZ + GOALPOST_PLACEMENT_SAMPLE_INSET },
+    { x: rect.minX + GOALPOST_PLACEMENT_SAMPLE_INSET, y: rect.maxZ - GOALPOST_PLACEMENT_SAMPLE_INSET },
+    { x: rect.maxX - GOALPOST_PLACEMENT_SAMPLE_INSET, y: rect.maxZ - GOALPOST_PLACEMENT_SAMPLE_INSET },
+  ];
+
+  if (samplePoints.some((point) => !isPointInAccessibleArea(point))) {
+    return false;
+  }
+
+  if (collisionRects.some((existingRect) => rectsOverlap(rect, existingRect))) {
+    return false;
+  }
+
+  if (
+    interactiveDoors.some((door) =>
+      getInteractiveDoorRects(door).some((doorRect) => rectsOverlap(rect, doorRect)),
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    furnitureRects.some(
+      (existingRect, index) =>
+        existingRect &&
+        index !== goalpost.colliderRectIndex &&
+        rectsOverlap(rect, existingRect),
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function movePlayerOutOfDroppedGoalpost(goalpost) {
+  const center = goalpost.previewPosition;
+  const forward = getFlatLookDirection(playerState.facingYaw, goalpostHoldForward);
+  const right = goalpostHoldRight.set(-forward.z, 0, forward.x).normalize();
+  const clearance = GOALPOST_PLAYER_CLEARANCE;
+  const candidateOffsets = [
+    [-clearance, 0],
+    [0, clearance],
+    [0, -clearance],
+    [clearance, 0],
+    [-clearance, clearance],
+    [-clearance, -clearance],
+    [clearance, clearance],
+    [clearance, -clearance],
+  ];
+
+  for (const [forwardOffset, rightOffset] of candidateOffsets) {
+    const candidate = goalpostPlacementTarget.copy(center)
+      .addScaledVector(forward, forwardOffset)
+      .addScaledVector(right, rightOffset);
+    if (isWalkable(new THREE.Vector2(candidate.x, candidate.z))) {
+      playerState.position.x = candidate.x;
+      playerState.position.z = candidate.z;
+      return;
+    }
+  }
+
+  const fallback = goalpost.lastPlacedPosition;
+  if (fallback) {
+    playerState.position.x = fallback.x;
+    playerState.position.z = fallback.z;
+  }
+}
+
+function updateCarriedGoalpostPlacement() {
+  const goalpost = state.carriedGoalpost;
+  if (!goalpost) {
+    return;
+  }
+
+  const dropRotation = playerState.facingYaw;
+  const candidate = getGoalpostPlacementTarget(goalpostPlacementTarget);
+  const canDrop = isGoalpostPlacementValid(goalpost, candidate, dropRotation);
+  goalpost.canDrop = canDrop;
+  goalpost.lastPlacedRotation = dropRotation;
+  if (canDrop) {
+    goalpost.lastValidPreviewPosition.copy(candidate);
+  }
+  goalpost.previewPosition.copy(candidate);
+  setGoalpostCarryPose(goalpost);
+}
+
+function startCarryingGoalpost(goalpost) {
+  if (state.carriedGoalpost) {
+    return;
+  }
+
+  goalpost.isCarried = true;
+  goalpost.canDrop = false;
+  state.carriedGoalpost = goalpost;
+  setGoalpostColliderEnabled(goalpost, false);
+  updateCarriedGoalpostPlacement();
+}
+
+function dropCarriedGoalpost(force = false) {
+  const goalpost = state.carriedGoalpost;
+  if (!goalpost) {
+    return false;
+  }
+
+  if (!force && !goalpost.canDrop) {
+    return false;
+  }
+
+  const resolvedPosition = force
+    ? goalpost.canDrop
+      ? goalpost.previewPosition
+      : goalpost.lastValidPreviewPosition ?? goalpost.lastPlacedPosition
+    : goalpost.previewPosition;
+  const resolvedRotation = goalpost.lastPlacedRotation;
+
+  goalpost.isCarried = false;
+  goalpost.canDrop = false;
+  state.carriedGoalpost = null;
+  setGoalpostPlacement(goalpost, resolvedPosition, resolvedRotation, { commit: true });
+  movePlayerOutOfDroppedGoalpost(goalpost);
+  return true;
+}
+
 function getHorseStatueColliderRects(statue, bounds) {
   const size = new THREE.Vector3();
   bounds.getSize(size);
@@ -12803,6 +13431,13 @@ function getNearestInteraction() {
       target: gong,
       distance: gong.interactionPoint.distanceTo(playerState.position),
     })),
+    ...interactiveGoalposts
+      .filter((goalpost) => !goalpost.isCarried)
+      .map((goalpost) => ({
+        type: "goalpost",
+        target: goalpost,
+        distance: goalpost.interactionPoint.distanceTo(playerState.position),
+      })),
   ]
     .filter(({ distance, target, type }) => distance <= getInteractionDistanceLimit(type, target))
     .sort((a, b) => a.distance - b.distance)[0];
@@ -12859,6 +13494,23 @@ function updateInteractionPrompt(elapsedTime) {
     return;
   }
 
+  if (state.carriedGoalpost) {
+    if (!positionInteractionPrompt(state.carriedGoalpost)) {
+      hideInteractionPrompt();
+      return;
+    }
+    interactionPromptEyebrow.textContent = "Goal Post";
+    interactionPromptTitle.textContent = state.carriedGoalpost.canDrop
+      ? "Press E to Drop Goal Post"
+      : "Find a Clear Drop Spot";
+    interactionPromptLine.textContent = state.carriedGoalpost.canDrop
+      ? "Drop it right in front of you."
+      : "Keep the floor in front clear.";
+    interactionPrompt.classList.remove("npc-prompt--hidden");
+    interactionPrompt.setAttribute("aria-hidden", "false");
+    return;
+  }
+
   const nearestInteraction = getNearestInteraction();
   if (!nearestInteraction || !positionInteractionPrompt(nearestInteraction.target)) {
     hideInteractionPrompt();
@@ -12880,6 +13532,10 @@ function updateInteractionPrompt(elapsedTime) {
     interactionPromptEyebrow.textContent = "Gong";
     interactionPromptTitle.textContent = "Press E to strike";
     interactionPromptLine.textContent = "Ring the gong.";
+  } else if (nearestInteraction.type === "goalpost") {
+    interactionPromptEyebrow.textContent = "Goal Post";
+    interactionPromptTitle.textContent = "Press E to Pick Up";
+    interactionPromptLine.textContent = "Carry it to a new spot.";
   } else {
     interactionPromptEyebrow.textContent = nearestInteraction.target.promptEyebrow;
     interactionPromptTitle.textContent = nearestInteraction.target.promptTitle;
@@ -12991,7 +13647,7 @@ function startProducerMan(npc) {
   hideInteractionPrompt();
   const line =
     npc.lines[Math.floor(Math.random() * npc.lines.length)] ??
-    "Run the floor, grab the fixes, and stop the disasters from eating the broadcast.";
+    "Switch the hangar cameras on cue and keep the show looking clean.";
   producerMan.start({
     hostName: npc.promptEyebrow ?? "Production",
     introLine: line,
@@ -13019,6 +13675,25 @@ function startJordiHero(npc) {
 }
 
 function handleJordiHeroExit() {
+  state.mode = "walk";
+  syncUi();
+}
+
+function startBrandonStack(npc) {
+  clearMovementState();
+  state.seatedSeat = null;
+  playerState.motion = 0;
+  state.mode = "minigame";
+  unlockPointer();
+  hideInteractionPrompt();
+  const line =
+    npc.lines[Math.floor(Math.random() * npc.lines.length)] ??
+    "Stack the Substack slices clean and keep the article full-width.";
+  brandonStack.start({ introLine: line });
+  syncUi();
+}
+
+function handleBrandonStackExit() {
   state.mode = "walk";
   syncUi();
 }
@@ -13113,6 +13788,11 @@ function standUpFromSeat() {
 }
 
 function toggleNearestInteraction() {
+  if (state.carriedGoalpost) {
+    dropCarriedGoalpost();
+    return;
+  }
+
   if (state.seatedSeat) {
     standUpFromSeat();
     return;
@@ -13130,6 +13810,11 @@ function toggleNearestInteraction() {
 
   if (nearestInteraction.type === "gong") {
     strikeGong(nearestInteraction.target);
+    return;
+  }
+
+  if (nearestInteraction.type === "goalpost") {
+    startCarryingGoalpost(nearestInteraction.target);
     return;
   }
 
@@ -13161,6 +13846,10 @@ function toggleNearestInteraction() {
     }
     if (npc.type === "jordiHero") {
       startJordiHero(npc);
+      return;
+    }
+    if (npc.type === "brandonStack") {
+      startBrandonStack(npc);
     }
     return;
   }
@@ -14326,9 +15015,19 @@ function angleDifference(current, target) {
   return Math.atan2(Math.sin(target - current), Math.cos(target - current));
 }
 
+function isObjectWithinRoot(object, root) {
+  for (let node = object; node; node = node.parent) {
+    if (node === root) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function syncPlayerPresentation(delta, elapsedTime) {
   const avatarVisible = state.mode === "overview" || state.walkView === "thirdPerson";
   const isSeated = Boolean(state.seatedSeat);
+  const isCarryingGoalpost = Boolean(state.carriedGoalpost);
   playerAvatar.group.visible = avatarVisible;
   playerAvatar.group.position.set(
     playerState.position.x,
@@ -14350,15 +15049,25 @@ function syncPlayerPresentation(delta, elapsedTime) {
           : 0;
       playerAvatar.leftArmPivot.rotation.x = -0.18;
       playerAvatar.rightArmPivot.rotation.x = -0.18;
+      playerAvatar.leftArmPivot.rotation.z = 0;
+      playerAvatar.rightArmPivot.rotation.z = 0;
       playerAvatar.leftLegPivot.rotation.x = 1.26;
       playerAvatar.rightLegPivot.rotation.x = 1.26;
       playerAvatar.torso.rotation.z = 0;
       playerAvatar.root.position.y =
         (state.seatedSeat?.surfaceHeight ?? 0.52) - 0.6 - seatedAvatarDrop;
+    } else if (isCarryingGoalpost) {
+      const stride = Math.sin(elapsedTime * (7 + playerState.motion * 5)) * playerState.motion;
+      playerAvatar.leftLegPivot.rotation.x = stride * -0.42;
+      playerAvatar.rightLegPivot.rotation.x = stride * 0.42;
+      playerAvatar.torso.rotation.z = 0.04;
+      playerAvatar.root.position.y = 0;
     } else {
       const stride = Math.sin(elapsedTime * (7 + playerState.motion * 5)) * playerState.motion;
       playerAvatar.leftArmPivot.rotation.x = stride * 0.85;
       playerAvatar.rightArmPivot.rotation.x = -stride * 0.85;
+      playerAvatar.leftArmPivot.rotation.z = 0;
+      playerAvatar.rightArmPivot.rotation.z = 0;
       playerAvatar.leftLegPivot.rotation.x = -stride * 0.72;
       playerAvatar.rightLegPivot.rotation.x = stride * 0.72;
       playerAvatar.torso.rotation.z = stride * 0.08;
@@ -14405,7 +15114,10 @@ function syncPlayerPresentation(delta, elapsedTime) {
     cameraCollisionRaycaster.far = idealDistance;
     const obstruction = cameraCollisionRaycaster
       .intersectObjects([architectureGroup, furnishingGroup], true)
-      .find(({ object }) => object.visible);
+      .find(({ object }) =>
+        object.visible &&
+        (!state.carriedGoalpost || !isObjectWithinRoot(object, state.carriedGoalpost.object)),
+      );
     const unobstructedDistance = obstruction
       ? Math.min(idealDistance, obstruction.distance - CAMERA_COLLISION_PADDING)
       : idealDistance;
@@ -14417,6 +15129,44 @@ function syncPlayerPresentation(delta, elapsedTime) {
     camera.position.copy(desiredCameraPosition);
   }
   camera.lookAt(cameraLookTarget);
+}
+
+function setCameraFov(fov) {
+  if (Math.abs(camera.fov - fov) > 0.001) {
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+  }
+}
+
+function setVectorFromPlanPoint(target, planPoint, y) {
+  const worldPoint = toWorldPoint(planPoint);
+  return target.set(worldPoint.x, y, worldPoint.z);
+}
+
+function applyProducerManCameraOverride(elapsedTime) {
+  const override = producerMan.getCameraOverride?.();
+  if (!override?.shotId) {
+    setCameraFov(DEFAULT_CAMERA_FOV);
+    return;
+  }
+
+  const shot = PRODUCER_MAN_CAMERA_SHOTS[override.shotId] ?? PRODUCER_MAN_CAMERA_SHOTS.wide;
+  setVectorFromPlanPoint(producerManShotPosition, shot.positionPlan, shot.positionY);
+  setVectorFromPlanPoint(producerManShotTarget, shot.targetPlan, shot.targetY);
+
+  const drift = shot.drift ?? {};
+  const phase = elapsedTime * (drift.speed ?? 0.4) + (drift.phase ?? 0);
+
+  producerManShotPosition.x += Math.sin(phase) * (drift.x ?? 0);
+  producerManShotPosition.y += Math.sin(phase * 0.73 + 0.6) * (drift.y ?? 0);
+  producerManShotPosition.z += Math.cos(phase * 0.9 + 0.3) * (drift.z ?? 0);
+  producerManShotTarget.x += Math.sin(phase * 0.55 + 0.25) * (drift.targetX ?? 0);
+  producerManShotTarget.y += Math.sin(phase * 0.62 + 1.2) * (drift.targetY ?? 0);
+  producerManShotTarget.z += Math.cos(phase * 0.47 + 0.8) * (drift.targetZ ?? 0);
+
+  setCameraFov(shot.fov ?? DEFAULT_CAMERA_FOV);
+  camera.position.copy(producerManShotPosition);
+  camera.lookAt(producerManShotTarget);
 }
 
 function animate() {
@@ -14446,8 +15196,8 @@ function animate() {
   });
 
   syncPlayerPresentation(delta, elapsedTime);
+  updateCarriedGoalpostPlacement();
   updateInteractionPrompt(elapsedTime);
-  updateCoordinateDisplay();
   forecastFrenzy.update(delta, elapsedTime);
   tylerBoard.update(delta, elapsedTime);
   nikChiefOfStaff.update(delta, elapsedTime);
@@ -14455,6 +15205,8 @@ function animate() {
   johnSponsorRead.update(delta, elapsedTime);
   producerMan.update(delta, elapsedTime);
   jordiHero.update(delta, elapsedTime);
+  brandonStack.update(delta, elapsedTime);
+  applyProducerManCameraOverride(elapsedTime);
   mirrorDistanceLods.forEach(({ reflective, fallback, threshold }) => {
     const worldPosition = new THREE.Vector3();
     reflective.getWorldPosition(worldPosition);
@@ -14570,42 +15322,7 @@ function attemptMove(deltaX, deltaZ) {
 const PLAZA_RADIUS = 34;
 
 function isWalkable(point) {
-  const dist = Math.sqrt(point.x * point.x + point.y * point.y);
-  if (dist > PLAZA_RADIUS) {
-    return false;
-  }
-
-  const room = worldRooms.find((candidate) => pointInPolygon({ x: point.x, z: point.y }, candidate.worldPoints));
-  const o5ExteriorLot = [
-    toWorldPoint([-6.0, FRONT_EDGE_Z - 6.0]),
-    toWorldPoint([OTHER5_RIGHT + 3.0, FRONT_EDGE_Z - 6.0]),
-    toWorldPoint([OTHER5_RIGHT + 3.0, OTHER5_DEPTH + 1.8]),
-    toWorldPoint([OTHER5_LEFT + 0.18, OTHER5_DEPTH + 1.8]),
-    toWorldPoint([OTHER5_LEFT + 0.18, LEFT_ROOM_DEPTH + 4.0]),
-    toWorldPoint([-6.0, LEFT_ROOM_DEPTH + 4.0]),
-  ];
-  const inO5Exterior = pointInPolygon({ x: point.x, z: point.y }, o5ExteriorLot);
-  if (!room && !inO5Exterior) {
-    return false;
-  }
-
-  const frontDoorWorldZLimit = toWorldPoint([0, OTHER5_DEPTH - 0.5]).z;
-  const frontDoorWorldXMin = toWorldPoint([OTHER5_LEFT, 0]).x;
-  const frontDoorWorldXMax = toWorldPoint([OTHER5_RIGHT, 0]).x;
-  if (
-    inO5Exterior &&
-    point.x >= frontDoorWorldXMin &&
-    point.x <= frontDoorWorldXMax &&
-    point.y < frontDoorWorldZLimit
-  ) {
-    return false;
-  }
-
-  if (
-    room &&
-    (room.id === "newRoom" || room.id === "hangarBay") &&
-    hangarInnerHeightAtWorldX(point.x) <= PLAYER_HEIGHT + 0.1
-  ) {
+  if (!isPointInAccessibleArea(point)) {
     return false;
   }
 
@@ -14617,7 +15334,7 @@ function isWalkable(point) {
     return false;
   }
 
-  if (furnitureRects.some((rect) => pointInRect(point, rect))) {
+  if (furnitureRects.some((rect) => rect && pointInRect(point, rect))) {
     return false;
   }
 
@@ -14635,6 +15352,7 @@ function enterWalkMode(view = "firstPerson") {
 }
 
 function enterOverviewMode(shouldUnlock = true) {
+  dropCarriedGoalpost(true);
   clearMovementState();
   state.seatedSeat = null;
   playerState.motion = 0;
@@ -14649,16 +15367,6 @@ function enterOverviewMode(shouldUnlock = true) {
     unlockPointer();
   }
   syncUi();
-}
-
-function updateCoordinateDisplay() {
-  if (!coordX || !coordY || !coordZ) {
-    return;
-  }
-  const p = playerState.position;
-  coordX.textContent = `x: ${p.x.toFixed(2)}`;
-  coordY.textContent = `y: ${p.y.toFixed(2)}`;
-  coordZ.textContent = `z: ${p.z.toFixed(2)}`;
 }
 
 function syncUi() {
@@ -14747,11 +15455,24 @@ function onKeyDown(event) {
     if (producerMan.handleKeyDown(event)) {
       return;
     }
+    if (brandonStack.handleKeyDown(event)) {
+      return;
+    }
     jordiHero.handleKeyDown(event);
     return;
   }
 
   switch (event.code) {
+    case "KeyM":
+      if (!event.repeat) {
+        if (bgMusic) {
+          toggleBgMusicMute();
+        } else {
+          startBackgroundMusic();
+          if (muteButton) muteButton.textContent = "🔊";
+        }
+      }
+      break;
     case "KeyW":
       if (state.mode === "walk" && isPointerLocked) {
         state.moveForward = true;
@@ -14950,6 +15671,15 @@ function axisAlignedBoundsForRotatedRect(center, width, depth, rotation, padding
     width * cos + depth * sin,
     width * sin + depth * cos,
     padding,
+  );
+}
+
+function rectsOverlap(a, b) {
+  return (
+    a.minX < b.maxX &&
+    a.maxX > b.minX &&
+    a.minZ < b.maxZ &&
+    a.maxZ > b.minZ
   );
 }
 

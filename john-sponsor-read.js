@@ -375,10 +375,15 @@ function buildFinalResult(completedReads) {
   };
 }
 
+function getSubscriberPerformance(result) {
+  return clamp((result?.averageScore ?? 0) / 100 * 0.8 + (result?.averageAccuracy ?? 0) * 0.2, 0, 1);
+}
+
 export class JohnSponsorReadOverlay {
-  constructor({ root, onExit }) {
+  constructor({ root, onExit, onRunComplete }) {
     this.root = root;
     this.onExit = onExit;
+    this.onRunComplete = onRunComplete;
 
     this.introLineElement = root.querySelector("#johnSponsorReadIntroLine");
     this.roundElement = root.querySelector("#johnSponsorReadRound");
@@ -428,6 +433,7 @@ export class JohnSponsorReadOverlay {
     this.promptSignature = "";
     this.queueSignature = "";
     this.resultSignature = "";
+    this.subscriberResult = null;
 
     this.startButton?.addEventListener("click", () => this.beginRun());
     this.exitButton?.addEventListener("click", () => this.exit("exit"));
@@ -454,6 +460,7 @@ export class JohnSponsorReadOverlay {
     this.promptSignature = "";
     this.queueSignature = "";
     this.resultSignature = "";
+    this.subscriberResult = null;
   }
 
   start({ introLine = DEFAULT_INTRO_LINE } = {}) {
@@ -475,6 +482,7 @@ export class JohnSponsorReadOverlay {
     this.promptSignature = "";
     this.queueSignature = "";
     this.resultSignature = "";
+    this.subscriberResult = null;
 
     this.root.classList.remove("forecast-frenzy--hidden");
     this.root.setAttribute("aria-hidden", "false");
@@ -495,6 +503,7 @@ export class JohnSponsorReadOverlay {
 
     this.completedReads = [];
     this.currentReadIndex = 0;
+    this.subscriberResult = null;
     this.loadCurrentRead();
     this.phase = "playing";
     this.cabinetVisible = true;
@@ -610,6 +619,13 @@ export class JohnSponsorReadOverlay {
     this.currentRemaining = 0;
     this.phase = "result";
     this.resultData = buildFinalResult(this.completedReads);
+    this.subscriberResult =
+      typeof this.onRunComplete === "function"
+        ? this.onRunComplete({
+            gameId: "johnSponsorRead",
+            performance: getSubscriberPerformance(this.resultData),
+          })
+        : null;
     this.resultSignature = "";
     this.sync();
   }
@@ -874,16 +890,18 @@ export class JohnSponsorReadOverlay {
       return;
     }
 
-    const signature = `${this.resultData.rank}__${this.resultData.summary}__${this.completedReads
-      .map((read) => `${read.id}:${read.score}`)
-      .join("|")}`;
+    const signature = `${this.resultData.rank}__${this.resultData.summary}__${this.subscriberResult?.totalText ?? "none"}__${
+      this.subscriberResult?.deltaChipText ?? "none"
+    }__${this.completedReads.map((read) => `${read.id}:${read.score}`).join("|")}`;
     if (signature === this.resultSignature) {
       return;
     }
     this.resultSignature = signature;
 
     this.resultRankElement.textContent = this.resultData.rank;
-    this.resultSummaryElement.textContent = this.resultData.summary;
+    this.resultSummaryElement.textContent = this.subscriberResult
+      ? `${this.subscriberResult.totalText} • ${this.subscriberResult.deltaText}`
+      : this.resultData.summary;
     this.resultRowsElement.replaceChildren();
     this.completedReads.forEach((read) => {
       const row = document.createElement("div");
@@ -899,7 +917,7 @@ export class JohnSponsorReadOverlay {
 
       const score = document.createElement("strong");
       score.className = "john-sponsor-read__report-score";
-      score.textContent = formatScore(read.score);
+      score.textContent = this.subscriberResult ? formatPercent(read.accuracy) : formatScore(read.score);
 
       row.append(brand, rating, score);
       this.resultRowsElement.append(row);
@@ -907,7 +925,16 @@ export class JohnSponsorReadOverlay {
 
     if (this.resultStatsElement) {
       this.resultStatsElement.replaceChildren();
-      this.resultData.chips.forEach((chip) => {
+      const baseChips = this.subscriberResult
+        ? this.resultData.chips.filter(
+            (chip) => !chip.startsWith("Average ") && !chip.startsWith("Best "),
+          )
+        : this.resultData.chips;
+      const resultChips = [
+        ...(this.subscriberResult ? [this.subscriberResult.totalText, this.subscriberResult.deltaChipText] : []),
+        ...baseChips,
+      ];
+      resultChips.forEach((chip) => {
         const chipElement = document.createElement("div");
         chipElement.className = "forecast-frenzy__chip";
         chipElement.textContent = chip;

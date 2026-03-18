@@ -191,6 +191,10 @@ function buildResult(stats, noteCount) {
   };
 }
 
+function getSubscriberPerformance(stats, noteCount) {
+  return clamp(noteCount > 0 ? stats.hits / noteCount : 0, 0, 1);
+}
+
 class SoundboardHeroAudio {
   constructor(tracks) {
     this.trackPools = tracks.map((track) => ({
@@ -313,9 +317,10 @@ class SoundboardHeroAudio {
 }
 
 export class JordiSoundboardHeroOverlay {
-  constructor({ root, onExit }) {
+  constructor({ root, onExit, onRunComplete }) {
     this.root = root;
     this.onExit = onExit;
+    this.onRunComplete = onRunComplete;
     this.introLineElement = root.querySelector("#jordiHeroIntroLine");
     this.scoreElement = root.querySelector("#jordiHeroScore");
     this.comboElement = root.querySelector("#jordiHeroCombo");
@@ -353,6 +358,7 @@ export class JordiSoundboardHeroOverlay {
     this.resultData = null;
     this.noteTrackHeight = 0;
     this.lanePulseUntil = Array(LANE_BINDINGS.length).fill(0);
+    this.subscriberResult = null;
 
     this.buildLanes();
     this.replayButton?.addEventListener("click", () => {
@@ -432,6 +438,7 @@ export class JordiSoundboardHeroOverlay {
     this.chart = buildChart(this.tracks.length);
     this.stats = this.createEmptyStats();
     this.resultData = null;
+    this.subscriberResult = null;
     this.feedbackUntil = 0;
     this.countdownDisplay = "";
     this.countdownSecond = null;
@@ -562,6 +569,13 @@ export class JordiSoundboardHeroOverlay {
     this.phase = "result";
     this.phaseTime = 0;
     this.resultData = buildResult(this.stats, this.chart.notes.length);
+    this.subscriberResult =
+      typeof this.onRunComplete === "function"
+        ? this.onRunComplete({
+            gameId: "jordiHero",
+            performance: getSubscriberPerformance(this.stats, this.chart.notes.length),
+          })
+        : null;
     this.audio.playFinish();
     this.sync();
   }
@@ -681,7 +695,14 @@ export class JordiSoundboardHeroOverlay {
     this.resultRankElement.textContent = this.resultData.rank;
     this.resultSummaryElement.textContent = this.resultData.summary;
     this.resultStatsElement.replaceChildren();
-    this.resultData.chips.forEach((chip) => {
+    const baseChips = this.subscriberResult
+      ? this.resultData.chips.filter((chip) => !chip.startsWith("Score "))
+      : this.resultData.chips;
+    const resultChips = [
+      ...(this.subscriberResult ? [this.subscriberResult.totalText, this.subscriberResult.deltaChipText] : []),
+      ...baseChips,
+    ];
+    resultChips.forEach((chip) => {
       const chipElement = document.createElement("div");
       chipElement.className = "forecast-frenzy__chip";
       chipElement.textContent = chip;

@@ -86,6 +86,10 @@ function buildResult(engine) {
   };
 }
 
+function getSubscriberPerformance(result) {
+  return clamp(result?.accuracy ?? 0, 0, 1);
+}
+
 const RETRO_MAP_CITIES = [
   { name: "Seattle", x: 0.12, y: 0.18, temp: 82 },
   { name: "Portland", x: 0.11, y: 0.26, temp: 83 },
@@ -1636,9 +1640,10 @@ function createChipElement(label) {
 }
 
 export class ForecastFrenzyGame {
-  constructor({ root, onExit }) {
+  constructor({ root, onExit, onRunComplete }) {
     this.root = root;
     this.onExit = onExit;
+    this.onRunComplete = onRunComplete;
     this.canvas = root.querySelector("#forecastFrenzyCanvas");
     this.banner = root.querySelector("#forecastBanner");
     this.introLine = root.querySelector("#forecastIntroLine");
@@ -1673,6 +1678,7 @@ export class ForecastFrenzyGame {
     this.active = false;
     this.exitReason = "exit";
     this.introSoundPlayed = false;
+    this.subscriberResult = null;
 
     this.replayButton?.addEventListener("click", () => {
       this.start({ introLine: "Match the term." });
@@ -1703,6 +1709,7 @@ export class ForecastFrenzyGame {
     this.audio.ensureContext();
     this.engine.start({ introLine });
     this.active = true;
+    this.subscriberResult = null;
     this.root.classList.remove("forecast-frenzy--hidden");
     this.root.setAttribute("aria-hidden", "false");
     this.startOverlay.hidden = true;
@@ -1779,6 +1786,13 @@ export class ForecastFrenzyGame {
 
     if (previousPhase !== "results" && this.engine.phase === "results") {
       this.audio.playEnd();
+      this.subscriberResult =
+        typeof this.onRunComplete === "function" && this.engine.result
+          ? this.onRunComplete({
+              gameId: "forecastFrenzy",
+              performance: getSubscriberPerformance(this.engine.result),
+            })
+          : null;
     }
 
     this.sync();
@@ -1932,9 +1946,12 @@ export class ForecastFrenzyGame {
     this.result.hidden = false;
     this.result.style.display = "grid";
     this.resultRank.textContent = snapshot.result.rank;
-    this.resultScore.textContent = `Score ${formatScore(snapshot.result.score)}`;
-    this.resultSummary.textContent = `Accuracy ${(snapshot.result.accuracy * 100).toFixed(0)}%`;
+    this.resultScore.textContent = this.subscriberResult?.totalText ?? `Score ${formatScore(snapshot.result.score)}`;
+    this.resultSummary.textContent = this.subscriberResult
+      ? `${this.subscriberResult.deltaText} • Accuracy ${(snapshot.result.accuracy * 100).toFixed(0)}%`
+      : `Accuracy ${(snapshot.result.accuracy * 100).toFixed(0)}%`;
     this.resultStats.replaceChildren(
+      ...(this.subscriberResult ? [createChipElement(this.subscriberResult.deltaChipText)] : []),
       createChipElement(`${snapshot.result.correctAnswers} correct calls`),
       createChipElement(`${snapshot.result.wrongAnswers} missed reads`),
       createChipElement(`Best streak x${snapshot.result.bestStreak}`),
