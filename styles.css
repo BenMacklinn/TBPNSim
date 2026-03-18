@@ -1056,6 +1056,7 @@ button:active {
     rgba(0, 0, 0, 1);
   opacity: var(--forecast-fade);
   transition: opacity 140ms linear;
+  pointer-events: none;
 }
 
 .forecast-frenzy__flash {
