@@ -1126,9 +1126,7 @@ function createProjectorYoutubeDisplay(parent, mesh, width, height, title, front
     }
   }
   iframe.addEventListener("load", () => {
-    window.setTimeout(() => {
-      syncProjectorDisplayPlayback(display, display === projectorPrimaryDisplay);
-    }, 250);
+    syncProjectorDisplayPlayback(display, display === projectorPrimaryDisplay);
   });
   return display;
 }
@@ -14021,6 +14019,42 @@ function addHangarRearShelf(center, rotation = 0) {
     roughness: 0.28,
     metalness: 0.32,
   });
+  const cardboardMaterial = new THREE.MeshStandardMaterial({
+    color: "#8f6949",
+    roughness: 0.88,
+    metalness: 0.04,
+  });
+  const tapeMaterial = new THREE.MeshStandardMaterial({
+    color: "#d4bc8a",
+    roughness: 0.72,
+    metalness: 0.04,
+  });
+  const hardCaseMaterial = new THREE.MeshStandardMaterial({
+    color: "#2a2d31",
+    roughness: 0.58,
+    metalness: 0.18,
+  });
+  const latchMaterial = new THREE.MeshStandardMaterial({
+    color: "#91969e",
+    roughness: 0.34,
+    metalness: 0.52,
+  });
+  const canisterMaterial = new THREE.MeshStandardMaterial({
+    color: "#c5cbd1",
+    roughness: 0.46,
+    metalness: 0.32,
+  });
+  const canisterCapMaterial = new THREE.MeshStandardMaterial({
+    color: "#2b3138",
+    roughness: 0.44,
+    metalness: 0.4,
+  });
+  const tubeMaterial = new THREE.MeshStandardMaterial({
+    color: "#23272c",
+    roughness: 0.52,
+    metalness: 0.16,
+  });
+  const bookColors = ["#7c838f", "#596576", "#8d614f", "#d6d1c9"];
 
   const addShelfPiece = (size, position, material = frameMaterial) => {
     const piece = new THREE.Mesh(
@@ -14029,6 +14063,119 @@ function addHangarRearShelf(center, rotation = 0) {
     );
     piece.position.set(position[0], position[1], position[2]);
     shelf.add(piece);
+  };
+
+  const addShelfProp = (object, position, rotation = [0, 0, 0]) => {
+    object.position.set(position[0], position[1], position[2]);
+    object.rotation.set(rotation[0], rotation[1], rotation[2]);
+    shelf.add(enableShadows(object));
+  };
+
+  const createStorageCase = (widthValue, heightValue, depthValue) => {
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(widthValue, heightValue, depthValue),
+      hardCaseMaterial,
+    );
+    body.position.y = heightValue / 2;
+    group.add(body);
+
+    const lid = new THREE.Mesh(
+      new THREE.BoxGeometry(widthValue * 0.96, 0.028, depthValue * 0.92),
+      frameMaterial,
+    );
+    lid.position.y = heightValue + 0.014;
+    group.add(lid);
+
+    [-widthValue * 0.22, widthValue * 0.22].forEach((x) => {
+      const latch = new THREE.Mesh(
+        new THREE.BoxGeometry(0.04, 0.03, 0.018),
+        latchMaterial,
+      );
+      latch.position.set(x, heightValue * 0.54, depthValue / 2 + 0.004);
+      group.add(latch);
+    });
+
+    return group;
+  };
+
+  const createCardboardBox = (widthValue, heightValue, depthValue) => {
+    const group = new THREE.Group();
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(widthValue, heightValue, depthValue),
+      cardboardMaterial,
+    );
+    body.position.y = heightValue / 2;
+    group.add(body);
+
+    const tape = new THREE.Mesh(
+      new THREE.BoxGeometry(widthValue * 0.16, heightValue + 0.002, depthValue + 0.004),
+      tapeMaterial,
+    );
+    tape.position.set(0, heightValue / 2, 0);
+    group.add(tape);
+
+    return group;
+  };
+
+  const createCanisterSet = (count, spacing = 0.11) => {
+    const group = new THREE.Group();
+    const startOffset = -((count - 1) * spacing) / 2;
+    for (let index = 0; index < count; index += 1) {
+      const canister = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.042, 0.042, 0.17, 18),
+        canisterMaterial,
+      );
+      canister.position.set(startOffset + index * spacing, 0.085, 0);
+      group.add(canister);
+
+      const cap = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.045, 0.045, 0.022, 18),
+        canisterCapMaterial,
+      );
+      cap.position.set(startOffset + index * spacing, 0.17, 0);
+      group.add(cap);
+    }
+    return group;
+  };
+
+  const createBookStack = (count, axis = "x") => {
+    const group = new THREE.Group();
+    let offset = -((count - 1) * 0.045) / 2;
+    for (let index = 0; index < count; index += 1) {
+      const thickness = 0.028 + (index % 2) * 0.006;
+      const heightValue = 0.19 + (index % 3) * 0.035;
+      const book = new THREE.Mesh(
+        new THREE.BoxGeometry(axis === "x" ? thickness : 0.15, heightValue, axis === "x" ? 0.15 : thickness),
+        new THREE.MeshStandardMaterial({
+          color: bookColors[index % bookColors.length],
+          roughness: 0.82,
+          metalness: 0.04,
+        }),
+      );
+      if (axis === "x") {
+        book.position.set(offset, heightValue / 2, 0);
+      } else {
+        book.position.set(0, heightValue / 2, offset);
+      }
+      group.add(book);
+      offset += thickness + 0.016;
+    }
+    return group;
+  };
+
+  const createTubeBundle = (count) => {
+    const group = new THREE.Group();
+    for (let index = 0; index < count; index += 1) {
+      const tube = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.028, 0.028, 0.28, 16),
+        tubeMaterial,
+      );
+      tube.rotation.z = Math.PI / 2;
+      tube.position.set(0, 0.03 + index * 0.035, (index - (count - 1) / 2) * 0.05);
+      group.add(tube);
+    }
+    return group;
   };
 
   addShelfPiece([width, topThickness, depth], [0, height - topThickness / 2, 0]);
@@ -14048,6 +14195,17 @@ function addHangarRearShelf(center, rotation = 0) {
       addShelfPiece([0.08, 0.06, 0.08], [x, 0.03, z], shelfShadowMaterial);
     });
   });
+
+  const lowerShelfTopY = topThickness;
+  const middleShelfTopY = height * 0.5 + dividerThickness / 2;
+  addShelfProp(createCardboardBox(0.34, 0.2, 0.24), [-1.54, lowerShelfTopY, -0.14]);
+  addShelfProp(createCanisterSet(3, 0.105), [-0.56, lowerShelfTopY, -0.03]);
+  addShelfProp(createBookStack(4, "x"), [0.54, lowerShelfTopY, -0.08]);
+  addShelfProp(createStorageCase(0.42, 0.16, 0.24), [1.52, lowerShelfTopY, 0.08]);
+  addShelfProp(createTubeBundle(3), [-1.46, middleShelfTopY, 0.12], [0, 0.08, 0]);
+  addShelfProp(createStorageCase(0.36, 0.14, 0.22), [-0.5, middleShelfTopY, 0.04]);
+  addShelfProp(createBookStack(5, "z"), [0.58, middleShelfTopY, 0]);
+  addShelfProp(createCardboardBox(0.28, 0.18, 0.2), [1.48, middleShelfTopY, -0.06]);
 
   const screenGroup = new THREE.Group();
   screenGroup.position.set(0, height + 2.88, depth / 2 - 0.12);
