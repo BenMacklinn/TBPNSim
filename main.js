@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { CSS3DObject, CSS3DRenderer } from "three/addons/renderers/CSS3DRenderer.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { Reflector } from "three/addons/objects/Reflector.js";
 import { createClient } from "@supabase/supabase-js";
@@ -33,6 +34,16 @@ const DEFAULT_LIGHTING_LAYER = 0;
 const HANGAR_LIGHTING_LAYER = 1;
 const SUPABASE_URL = "https://tmutzmsabelfmnexlxzn.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRtdXR6bXNhYmVsZm1uZXhseHpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4NTM0MDgsImV4cCI6MjA4OTQyOTQwOH0.BXpjJzCsrJognU7DynKU29pJsDAsDTgvE6im-20LJ0w";
+const PROJECTOR_STATUS_ENDPOINT = `${SUPABASE_URL}/functions/v1/tbpn-live-status`;
+const PROJECTOR_STATUS_REFRESH_MS = 30000;
+const PROJECTOR_HLS_MIME_TYPE = "application/vnd.apple.mpegurl";
+const PROJECTOR_YOUTUBE_CHANNEL_ID = "UC-DRzaGnL_vtBUpCFH5M0tg";
+const PROJECTOR_SCREEN_WIDTH = 3.8;
+const PROJECTOR_SCREEN_HEIGHT = 2.62;
+const PROJECTOR_YOUTUBE_EMBED_WIDTH = 1280;
+const PROJECTOR_YOUTUBE_EMBED_HEIGHT = Math.round(
+  PROJECTOR_YOUTUBE_EMBED_WIDTH * (PROJECTOR_SCREEN_HEIGHT / PROJECTOR_SCREEN_WIDTH),
+);
 const PLAYER_HEIGHT = 1.8;
 const PLAYER_RADIUS = 0.24;
 const POINTER_LOOK_SENSITIVITY = 0.0022;
@@ -614,6 +625,21 @@ let multiplayerTrackPromise = null;
 let multiplayerBroadcastPromise = null;
 let multiplayerWorldEventOrder = 0;
 let multiplayerWorldSyncRequestOrder = 0;
+let projectorScreenMaterial = null;
+let projectorScreenMesh = null;
+let projectorFallbackTexture = null;
+let projectorVideoElement = null;
+let projectorVideoTexture = null;
+let projectorPlaybackUrl = "";
+let projectorMimeType = "";
+let projectorStreamMode = "fallback";
+let projectorStatusTimer = null;
+let projectorStatusRequest = null;
+let projectorHlsController = null;
+let projectorYoutubeVideoId = "";
+let projectorCssObject = null;
+let projectorCssIframe = null;
+let projectorYoutubeAudioUnlocked = false;
 const multiplayerRoomId = getMultiplayerRoomId();
 const multiplayerClientId =
   globalThis.crypto?.randomUUID?.() ?? `client-${Math.random().toString(36).slice(2, 10)}`;
@@ -707,6 +733,12 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const projectorCssRenderer = new CSS3DRenderer();
+projectorCssRenderer.setSize(window.innerWidth, window.innerHeight);
+projectorCssRenderer.domElement.className = "projector-overlay-layer";
+projectorCssRenderer.domElement.setAttribute("aria-hidden", "true");
+document.body.append(projectorCssRenderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#959a94");
@@ -982,6 +1014,419 @@ function syncSharedSeatEffects(seat, nextOccupiedByClientId) {
   }
 }
 
+function normalizeProjectorStatusPayload(payload) {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const playbackUrl =
+    typeof payload.playbackUrl === "string"
+      ? payload.playbackUrl.trim()
+      : typeof payload.streamUrl === "string"
+      ? payload.streamUrl.trim()
+      : typeof payload.hlsUrl === "string"
+      ? payload.hlsUrl.trim()
+      : "";
+  const mimeType =
+    typeof payload.mimeType === "string"
+      ? payload.mimeType.trim()
+      : typeof payload.contentType === "string"
+      ? payload.contentType.trim()
+      : "";
+
+  return {
+    live: Boolean(payload.live ?? payload.isLive),
+    playbackUrl,
+    mimeType,
+    videoId: typeof payload.videoId === "string" ? payload.videoId.trim() : "",
+  };
+}
+
+function buildProjectorYoutubeEmbedUrl(videoId = "") {
+  const params = new URLSearchParams({
+    autoplay: "1",
+    mute: "1",
+    playsinline: "1",
+    controls: "0",
+    modestbranding: "1",
+    rel: "0",
+    enablejsapi: "1",
+  });
+  if (window.location.origin && window.location.origin !== "null") {
+    params.set("origin", window.location.origin);
+  }
+
+  if (videoId) {
+    return `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?${params.toString()}`;
+  }
+
+  params.set("channel", PROJECTOR_YOUTUBE_CHANNEL_ID);
+  return `https://www.youtube.com/embed/live_stream?${params.toString()}`;
+}
+
+function initializeProjectorYoutubeOverlay(parent) {
+  if (!parent || projectorCssObject) {
+    return;
+  }
+
+  const shell = document.createElement("div");
+  shell.className = "projector-youtube-shell";
+  shell.style.width = `${PROJECTOR_YOUTUBE_EMBED_WIDTH}px`;
+  shell.style.height = `${PROJECTOR_YOUTUBE_EMBED_HEIGHT}px`;
+
+  const iframe = document.createElement("iframe");
+  iframe.className = "projector-youtube-frame";
+  iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+  iframe.referrerPolicy = "strict-origin-when-cross-origin";
+  iframe.setAttribute("allowfullscreen", "");
+  iframe.setAttribute("title", "TBPN live projector");
+  iframe.tabIndex = -1;
+  iframe.addEventListener("load", () => {
+    if (!projectorYoutubeAudioUnlocked) {
+      return;
+    }
+    window.setTimeout(() => {
+      syncProjectorYoutubeAudioState();
+    }, 250);
+  });
+  shell.append(iframe);
+
+  const cssObject = new CSS3DObject(shell);
+  cssObject.position.copy(projectorScreenMesh.position);
+  cssObject.rotation.copy(projectorScreenMesh.rotation);
+  cssObject.scale.set(
+    PROJECTOR_SCREEN_WIDTH / PROJECTOR_YOUTUBE_EMBED_WIDTH,
+    PROJECTOR_SCREEN_HEIGHT / PROJECTOR_YOUTUBE_EMBED_HEIGHT,
+    1,
+  );
+  cssObject.visible = false;
+  parent.add(cssObject);
+
+  projectorCssObject = cssObject;
+  projectorCssIframe = iframe;
+}
+
+function hideProjectorYoutubeOverlay() {
+  projectorYoutubeVideoId = "";
+  if (!projectorCssObject || !projectorCssIframe) {
+    return;
+  }
+
+  projectorCssObject.visible = false;
+  projectorCssIframe.removeAttribute("src");
+}
+
+function showProjectorYoutubeOverlay(videoId = "") {
+  if (!projectorCssObject || !projectorCssIframe) {
+    return;
+  }
+
+  const nextVideoId = videoId || "";
+  const nextUrl = buildProjectorYoutubeEmbedUrl(nextVideoId);
+  if (projectorYoutubeVideoId !== nextVideoId || projectorCssIframe.src !== nextUrl) {
+    projectorCssIframe.src = nextUrl;
+    projectorYoutubeVideoId = nextVideoId;
+  }
+
+  projectorCssObject.visible = true;
+  syncProjectorYoutubeAudioState();
+}
+
+function postProjectorYoutubeCommand(func, args = []) {
+  if (!projectorCssIframe?.contentWindow) {
+    return;
+  }
+
+  projectorCssIframe.contentWindow.postMessage(
+    JSON.stringify({
+      event: "command",
+      func,
+      args,
+    }),
+    "https://www.youtube.com",
+  );
+}
+
+function syncProjectorYoutubeAudioState() {
+  if (!projectorCssObject?.visible || !projectorCssIframe) {
+    return;
+  }
+
+  if (projectorYoutubeAudioUnlocked) {
+    postProjectorYoutubeCommand("unMute");
+    postProjectorYoutubeCommand("setVolume", [100]);
+    postProjectorYoutubeCommand("playVideo");
+    return;
+  }
+
+  postProjectorYoutubeCommand("mute");
+}
+
+function unlockProjectorYoutubeAudio() {
+  if (projectorYoutubeAudioUnlocked) {
+    return;
+  }
+
+  projectorYoutubeAudioUnlocked = true;
+  syncProjectorYoutubeAudioState();
+}
+
+function getProjectorVideoElement() {
+  if (projectorVideoElement) {
+    return projectorVideoElement;
+  }
+
+  const video = document.createElement("video");
+  video.muted = true;
+  video.autoplay = true;
+  video.playsInline = true;
+  video.preload = "auto";
+  video.crossOrigin = "anonymous";
+  video.setAttribute("muted", "");
+  video.setAttribute("playsinline", "");
+  video.setAttribute("webkit-playsinline", "true");
+  video.style.display = "none";
+  document.body.append(video);
+  projectorVideoElement = video;
+  return video;
+}
+
+function destroyProjectorHlsController() {
+  if (!projectorHlsController) {
+    return;
+  }
+
+  projectorHlsController.destroy();
+  projectorHlsController = null;
+}
+
+function ensureProjectorVideoTexture(video) {
+  if (projectorVideoTexture) {
+    return projectorVideoTexture;
+  }
+
+  projectorVideoTexture = new THREE.VideoTexture(video);
+  projectorVideoTexture.colorSpace = THREE.SRGBColorSpace;
+  projectorVideoTexture.minFilter = THREE.LinearFilter;
+  projectorVideoTexture.magFilter = THREE.LinearFilter;
+  return projectorVideoTexture;
+}
+
+function applyProjectorFallbackTexture() {
+  if (!projectorScreenMaterial || !projectorFallbackTexture) {
+    return;
+  }
+
+  destroyProjectorHlsController();
+  if (projectorVideoElement) {
+    projectorVideoElement.pause();
+    projectorVideoElement.removeAttribute("src");
+    projectorVideoElement.load();
+  }
+
+  projectorPlaybackUrl = "";
+  projectorMimeType = "";
+  projectorStreamMode = "fallback";
+  projectorScreenMaterial.map = projectorFallbackTexture;
+  projectorScreenMaterial.emissiveMap = null;
+  projectorScreenMaterial.emissiveIntensity = 0.16;
+  projectorScreenMaterial.needsUpdate = true;
+}
+
+function projectorStreamLooksLikeHls(playbackUrl, mimeType = "") {
+  return (
+    mimeType.toLowerCase().includes("mpegurl") ||
+    /\.m3u8(?:$|\?)/i.test(playbackUrl)
+  );
+}
+
+async function playProjectorVideo(video) {
+  try {
+    await video.play();
+  } catch (error) {
+    console.warn("Projector autoplay was blocked", error);
+  }
+}
+
+function waitForProjectorVideoFrame(video, timeoutMs = 12000) {
+  return new Promise((resolve, reject) => {
+    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0) {
+      resolve();
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("Timed out waiting for projector video frame"));
+    }, timeoutMs);
+
+    const onReady = () => {
+      if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA || video.videoWidth <= 0) {
+        return;
+      }
+      cleanup();
+      resolve();
+    };
+
+    const onError = () => {
+      cleanup();
+      reject(new Error("Projector video failed to load"));
+    };
+
+    const cleanup = () => {
+      clearTimeout(timeoutId);
+      video.removeEventListener("loadeddata", onReady);
+      video.removeEventListener("canplay", onReady);
+      video.removeEventListener("playing", onReady);
+      video.removeEventListener("error", onError);
+    };
+
+    video.addEventListener("loadeddata", onReady);
+    video.addEventListener("canplay", onReady);
+    video.addEventListener("playing", onReady);
+    video.addEventListener("error", onError);
+  });
+}
+
+async function applyProjectorPlayback(playbackUrl, mimeType = "") {
+  if (!projectorScreenMaterial || !playbackUrl) {
+    return;
+  }
+
+  const video = getProjectorVideoElement();
+  const normalizedMimeType = mimeType || (projectorStreamLooksLikeHls(playbackUrl) ? PROJECTOR_HLS_MIME_TYPE : "");
+  const canPlayNatively =
+    !normalizedMimeType || video.canPlayType(normalizedMimeType) !== "";
+
+  if (
+    projectorStreamMode === "live" &&
+    projectorPlaybackUrl === playbackUrl &&
+    projectorMimeType === normalizedMimeType
+  ) {
+    await playProjectorVideo(video);
+    await waitForProjectorVideoFrame(video);
+    return;
+  }
+
+  destroyProjectorHlsController();
+  video.pause();
+
+  if (
+    projectorStreamLooksLikeHls(playbackUrl, normalizedMimeType) &&
+    !canPlayNatively &&
+    globalThis.Hls?.isSupported?.()
+  ) {
+    projectorHlsController = new globalThis.Hls({
+      enableWorker: true,
+      lowLatencyMode: true,
+      backBufferLength: 90,
+    });
+    projectorHlsController.loadSource(playbackUrl);
+    projectorHlsController.attachMedia(video);
+    projectorHlsController.on(globalThis.Hls.Events.MANIFEST_PARSED, () => {
+      void playProjectorVideo(video);
+    });
+    projectorHlsController.on(globalThis.Hls.Events.ERROR, (_event, data) => {
+      if (!data?.fatal) {
+        return;
+      }
+      console.error("Projector HLS playback failed", data);
+      applyProjectorFallbackTexture();
+    });
+  } else {
+    video.src = playbackUrl;
+    video.load();
+    await playProjectorVideo(video);
+  }
+
+  await waitForProjectorVideoFrame(video);
+
+  const videoTexture = ensureProjectorVideoTexture(video);
+  projectorPlaybackUrl = playbackUrl;
+  projectorMimeType = normalizedMimeType;
+  projectorStreamMode = "live";
+  projectorScreenMaterial.map = videoTexture;
+  projectorScreenMaterial.emissiveMap = videoTexture;
+  projectorScreenMaterial.emissiveIntensity = 0.28;
+  projectorScreenMaterial.needsUpdate = true;
+}
+
+async function refreshProjectorStatus() {
+  if (!projectorScreenMaterial || projectorStatusRequest) {
+    return;
+  }
+
+  projectorStatusRequest = fetch(PROJECTOR_STATUS_ENDPOINT, {
+    method: "GET",
+    cache: "no-store",
+    headers: {
+      accept: "application/json",
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+    },
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Projector status request failed (${response.status})`);
+      }
+      return response.json();
+    })
+    .then(async (payload) => {
+      const nextStatus = normalizeProjectorStatusPayload(payload);
+      if (!nextStatus?.live) {
+        hideProjectorYoutubeOverlay();
+        applyProjectorFallbackTexture();
+        return;
+      }
+
+      showProjectorYoutubeOverlay(nextStatus.videoId);
+
+      if (!nextStatus.playbackUrl) {
+        applyProjectorFallbackTexture();
+        return;
+      }
+
+      await applyProjectorPlayback(nextStatus.playbackUrl, nextStatus.mimeType);
+    })
+    .catch((error) => {
+      console.error("Unable to refresh projector status", error);
+    })
+    .finally(() => {
+      projectorStatusRequest = null;
+    });
+
+  await projectorStatusRequest;
+}
+
+function startProjectorStatusPolling() {
+  if (projectorStatusTimer) {
+    clearInterval(projectorStatusTimer);
+  }
+
+  projectorStatusTimer = window.setInterval(() => {
+    void refreshProjectorStatus();
+  }, PROJECTOR_STATUS_REFRESH_MS);
+
+  void refreshProjectorStatus();
+}
+
+function stopProjectorStatusPolling() {
+  if (projectorStatusTimer) {
+    clearInterval(projectorStatusTimer);
+    projectorStatusTimer = null;
+  }
+
+  if (projectorStatusRequest) {
+    projectorStatusRequest = null;
+  }
+
+  destroyProjectorHlsController();
+  if (projectorVideoElement) {
+    projectorVideoElement.pause();
+  }
+  hideProjectorYoutubeOverlay();
+}
+
 function formatSubscriberCount(value) {
   return Math.max(0, Math.round(value)).toLocaleString();
 }
@@ -1104,6 +1549,7 @@ function buildLocalMultiplayerPresenceSnapshot() {
     clientId: multiplayerClientId,
     profileId: activeSubscriberProfileKey,
     displayName: sanitizeSubscriberName(activeSubscriberName) || "Player",
+    subscriberCount: Math.max(0, Math.round(subscriberCount)),
     pose: getLocalMultiplayerPose(),
     x: roundMultiplayerNumber(playerState.position.x),
     y: roundMultiplayerNumber(playerState.position.y),
@@ -1123,6 +1569,7 @@ function buildLocalMultiplayerPresenceSnapshot() {
 function getMultiplayerPayloadSignature(payload) {
   return [
     payload.displayName,
+    payload.subscriberCount ?? "",
     payload.pose,
     payload.x,
     payload.y,
@@ -1158,6 +1605,7 @@ function normalizeMultiplayerPresenceSnapshot(snapshot) {
   const pitch = Number(snapshot.pitch);
   const facingYaw = Number(snapshot.facingYaw);
   const motion = Number(snapshot.motion);
+  const subscriberCount = Number(snapshot.subscriberCount);
   const seatSurfaceHeight =
     snapshot.seatSurfaceHeight == null ? Number.NaN : Number(snapshot.seatSurfaceHeight);
   const carriedGoalpost =
@@ -1178,6 +1626,7 @@ function normalizeMultiplayerPresenceSnapshot(snapshot) {
     clientId: typeof snapshot.clientId === "string" ? snapshot.clientId : "",
     profileId: typeof snapshot.profileId === "string" ? snapshot.profileId : "",
     displayName: sanitizeSubscriberName(snapshot.displayName ?? snapshot.name ?? "") || "Player",
+    subscriberCount: Number.isFinite(subscriberCount) ? Math.max(0, Math.round(subscriberCount)) : 0,
     pose:
       snapshot.pose === "seated"
         ? "seated"
@@ -1209,24 +1658,28 @@ function normalizeMultiplayerPresenceSnapshot(snapshot) {
   };
 }
 
-function createMultiplayerNameplate(displayName) {
+function createMultiplayerNameplate(displayName, subscriberTotal = 0) {
   const label = sanitizeSubscriberName(displayName) || "Player";
+  const subscriberLabel = `${formatSubscriberCount(subscriberTotal)} subscribers`;
   const canvas = document.createElement("canvas");
   canvas.width = 512;
-  canvas.height = 128;
+  canvas.height = 160;
   const context = canvas.getContext("2d");
   if (context) {
     context.clearRect(0, 0, canvas.width, canvas.height);
     context.fillStyle = "rgba(8, 14, 24, 0.84)";
-    context.fillRect(16, 18, 480, 92);
+    context.fillRect(16, 14, 480, 124);
     context.strokeStyle = "rgba(255, 189, 117, 0.74)";
     context.lineWidth = 4;
-    context.strokeRect(16, 18, 480, 92);
+    context.strokeRect(16, 14, 480, 124);
     context.fillStyle = "#fff4dc";
-    context.font = '700 44px "Arial Rounded MT Bold", "Trebuchet MS", sans-serif';
+    context.font = '700 40px "Arial Rounded MT Bold", "Trebuchet MS", sans-serif';
     context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillText(label, canvas.width / 2, canvas.height / 2, 430);
+    context.textBaseline = "alphabetic";
+    context.fillText(label, canvas.width / 2, 68, 430);
+    context.fillStyle = "rgba(255, 224, 180, 0.94)";
+    context.font = '600 24px "Trebuchet MS", "Arial Rounded MT Bold", sans-serif';
+    context.fillText(subscriberLabel, canvas.width / 2, 112, 430);
   }
 
   const texture = new THREE.CanvasTexture(canvas);
@@ -1237,8 +1690,8 @@ function createMultiplayerNameplate(displayName) {
     depthWrite: false,
   });
   const sprite = new THREE.Sprite(material);
-  sprite.position.set(0, 2.18, 0);
-  sprite.scale.set(1.9, 0.48, 1);
+  sprite.position.set(0, 2.26, 0);
+  sprite.scale.set(1.9, 0.6, 1);
   return sprite;
 }
 
@@ -1255,7 +1708,7 @@ function disposeMultiplayerNameplate(sprite) {
 
 function createRemotePlayerEntry(key, snapshot) {
   const avatar = createPlayerAvatar(getRemoteAvatarPalette(snapshot.profileId || snapshot.displayName || key));
-  const nameplate = createMultiplayerNameplate(snapshot.displayName);
+  const nameplate = createMultiplayerNameplate(snapshot.displayName, snapshot.subscriberCount);
   avatar.group.add(nameplate);
   remotePlayerGroup.add(avatar.group);
 
@@ -1264,6 +1717,8 @@ function createRemotePlayerEntry(key, snapshot) {
     clientId: snapshot.clientId,
     profileId: snapshot.profileId,
     displayName: snapshot.displayName,
+    subscriberCount: snapshot.subscriberCount ?? 0,
+    carriedGoalpostId: snapshot.carriedGoalpost?.id ?? "",
     avatar,
     nameplate,
     targetPosition: new THREE.Vector3(),
@@ -1282,19 +1737,21 @@ function createRemotePlayerEntry(key, snapshot) {
 }
 
 function applyRemotePlayerSnapshot(entry, snapshot, snapImmediately = false) {
-  if (entry.displayName !== snapshot.displayName) {
+  if (entry.displayName !== snapshot.displayName || entry.subscriberCount !== (snapshot.subscriberCount ?? 0)) {
     entry.displayName = snapshot.displayName;
+    entry.subscriberCount = snapshot.subscriberCount ?? 0;
     if (entry.nameplate) {
       entry.avatar.group.remove(entry.nameplate);
       disposeMultiplayerNameplate(entry.nameplate);
     }
-    entry.nameplate = createMultiplayerNameplate(snapshot.displayName);
+    entry.nameplate = createMultiplayerNameplate(snapshot.displayName, entry.subscriberCount);
     entry.avatar.group.add(entry.nameplate);
   }
 
   entry.profileId = snapshot.profileId;
   entry.clientId = snapshot.clientId;
   entry.pose = snapshot.pose;
+  entry.carriedGoalpostId = snapshot.carriedGoalpost?.id ?? "";
   entry.seatSurfaceHeight = snapshot.seatSurfaceHeight ?? DEFAULT_SEAT_SURFACE_HEIGHT;
   entry.targetPosition.set(
     snapshot.x,
@@ -2522,9 +2979,11 @@ buildFurnishings();
 removeFrontRoomCeilingIntrusions();
 buildLighting();
 syncPlayerPresentation(0, 0);
+startProjectorStatusPolling();
 
 const startBgMusicOnInteraction = () => {
   startBackgroundMusic();
+  unlockProjectorYoutubeAudio();
   canvas.removeEventListener("click", startBgMusicOnInteraction);
   document.removeEventListener("keydown", startBgMusicOnInteraction);
 };
@@ -2538,6 +2997,7 @@ window.addEventListener("keydown", onKeyDown);
 window.addEventListener("keyup", onKeyUp);
 window.addEventListener("blur", clearMovementState);
 window.addEventListener("beforeunload", disconnectMultiplayerSession);
+window.addEventListener("beforeunload", stopProjectorStatusPolling);
 if (sessionGateForm) {
   sessionGateForm.addEventListener("submit", (event) => {
     void handleSessionGateSubmit(event);
@@ -12069,9 +12529,9 @@ function setGoalpostPlacement(goalpost, worldCenter, rotation = goalpost.object.
   }
 }
 
-function setArmPoseToWorldTarget(armPivot, targetWorld) {
+function setArmPoseToWorldTargetForAvatar(avatar, armPivot, targetWorld) {
   goalpostCarryTargetLocal.copy(targetWorld);
-  playerAvatar.root.worldToLocal(goalpostCarryTargetLocal);
+  avatar.root.worldToLocal(goalpostCarryTargetLocal);
   goalpostCarryTargetLocal.sub(armPivot.position);
 
   const targetLength = goalpostCarryTargetLocal.length();
@@ -12088,15 +12548,14 @@ function setArmPoseToWorldTarget(armPivot, targetWorld) {
   armPivot.rotation.z = Math.asin(clamp(goalpostCarryTargetLocal.x, -1, 1));
 }
 
-function setThirdPersonGoalpostCarryPose(goalpost) {
-  const carryYaw = playerAvatar.root.rotation.y;
+function setThirdPersonGoalpostCarryPoseForAvatar(goalpost, avatar, carryYaw = avatar.root.rotation.y) {
   goalpostHoldForward.set(-Math.sin(carryYaw), 0, -Math.cos(carryYaw));
   goalpostHoldRight.set(-goalpostHoldForward.z, 0, goalpostHoldForward.x).normalize();
 
-  goalpostCarryLeftTarget.copy(playerAvatar.leftArmPivot.position);
-  playerAvatar.root.localToWorld(goalpostCarryLeftTarget);
-  goalpostCarryRightTarget.copy(playerAvatar.rightArmPivot.position);
-  playerAvatar.root.localToWorld(goalpostCarryRightTarget);
+  goalpostCarryLeftTarget.copy(avatar.leftArmPivot.position);
+  avatar.root.localToWorld(goalpostCarryLeftTarget);
+  goalpostCarryRightTarget.copy(avatar.rightArmPivot.position);
+  avatar.root.localToWorld(goalpostCarryRightTarget);
 
   goalpostCarryMidpoint.copy(goalpostCarryLeftTarget).add(goalpostCarryRightTarget).multiplyScalar(0.5);
 
@@ -12106,7 +12565,7 @@ function setThirdPersonGoalpostCarryPose(goalpost) {
 
   const lateralReach = Math.max(
     0,
-    Math.abs(playerAvatar.rightArmPivot.position.x - playerAvatar.leftArmPivot.position.x) / 2 - GOALPOST_STEM_RADIUS,
+    Math.abs(avatar.rightArmPivot.position.x - avatar.leftArmPivot.position.x) / 2 - GOALPOST_STEM_RADIUS,
   );
   const verticalReach = goalpostCarryGripCenter.y + GOALPOST_HOLD_BASE_HEIGHT_THIRD_PERSON - goalpostCarryMidpoint.y;
   const forwardReach = Math.sqrt(
@@ -12129,9 +12588,13 @@ function setThirdPersonGoalpostCarryPose(goalpost) {
   goalpostCarryLeftGripWorld.copy(goalpostLeftGripLocal).applyQuaternion(goalpostCarryQuaternion).add(goalpost.object.position);
   goalpostCarryRightGripWorld.copy(goalpostRightGripLocal).applyQuaternion(goalpostCarryQuaternion).add(goalpost.object.position);
 
-  setArmPoseToWorldTarget(playerAvatar.leftArmPivot, goalpostCarryLeftGripWorld);
-  setArmPoseToWorldTarget(playerAvatar.rightArmPivot, goalpostCarryRightGripWorld);
+  setArmPoseToWorldTargetForAvatar(avatar, avatar.leftArmPivot, goalpostCarryLeftGripWorld);
+  setArmPoseToWorldTargetForAvatar(avatar, avatar.rightArmPivot, goalpostCarryRightGripWorld);
   updateGoalpostInteractionPoint(goalpost);
+}
+
+function setThirdPersonGoalpostCarryPose(goalpost) {
+  setThirdPersonGoalpostCarryPoseForAvatar(goalpost, playerAvatar, playerAvatar.root.rotation.y);
 }
 
 function setGoalpostCarryPose(goalpost) {
@@ -13389,6 +13852,10 @@ function addHangarRearShelf(center, rotation = 0) {
   );
   screenFace.position.set(0, -1.42, 0.085);
   screenGroup.add(screenFace);
+  projectorFallbackTexture = projectorTexture;
+  projectorScreenMaterial = screenMaterial;
+  projectorScreenMesh = screenFace;
+  initializeProjectorYoutubeOverlay(screenGroup);
 
   const lowerBar = new THREE.Mesh(
     new THREE.BoxGeometry(3.88, 0.06, 0.06),
@@ -16791,6 +17258,9 @@ function animateRemotePlayers(delta, elapsedTime) {
       motionStep,
     );
     const visibleMotion = entry.visibleMotion;
+    const carriedGoalpost = entry.carriedGoalpostId
+      ? findInteractiveGoalpostById(entry.carriedGoalpostId)
+      : null;
 
     if (entry.pose === "seated") {
       entry.avatar.leftArmPivot.rotation.x = -0.18;
@@ -16808,6 +17278,26 @@ function animateRemotePlayers(delta, elapsedTime) {
       entry.avatar.head.rotation.y = SITTING_POSE.headRotationY;
       entry.avatar.shadow.scale.setScalar(0.92);
       entry.avatar.shadow.material.opacity = 0.12;
+      return;
+    }
+
+    if (entry.pose === "carrying" && carriedGoalpost) {
+      const stride = Math.sin((elapsedTime + entry.animationPhase) * (7 + visibleMotion * 5)) * visibleMotion;
+      entry.avatar.leftLegPivot.rotation.x = stride * -0.42;
+      entry.avatar.rightLegPivot.rotation.x = stride * 0.42;
+      entry.avatar.leftKneePivot.rotation.x = 0;
+      entry.avatar.rightKneePivot.rotation.x = 0;
+      entry.avatar.torso.rotation.x = 0;
+      entry.avatar.torso.rotation.z = 0.04;
+      entry.avatar.root.position.y = 0;
+      setThirdPersonGoalpostCarryPoseForAvatar(carriedGoalpost, entry.avatar, entry.avatar.root.rotation.y);
+      entry.avatar.head.rotation.x = Math.max(-0.25, Math.min(0.25, entry.targetPitch * 0.5));
+      entry.avatar.head.rotation.y = Math.max(
+        -0.45,
+        Math.min(0.45, angleDifference(entry.targetFacingYaw, entry.targetYaw) * 0.4),
+      );
+      entry.avatar.shadow.scale.setScalar(1);
+      entry.avatar.shadow.material.opacity = 0.18;
       return;
     }
 
@@ -17037,6 +17527,7 @@ function animate() {
     fallback.visible = useFallback;
   });
   renderer.render(scene, camera);
+  projectorCssRenderer.render(scene, camera);
 }
 
 function updateWalkthrough(delta) {
@@ -17235,6 +17726,7 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  projectorCssRenderer.setSize(window.innerWidth, window.innerHeight);
 }
 
 function unlockPointer() {
