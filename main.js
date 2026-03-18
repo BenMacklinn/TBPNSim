@@ -213,6 +213,9 @@ const MULTIPLAYER_TRACK_INTERVAL_MS = 120;
 const MULTIPLAYER_IDLE_REFRESH_MS = 2500;
 const MULTIPLAYER_CHANNEL_PREFIX = "tbpn-sim:world";
 const MULTIPLAYER_BROADCAST_EVENT = "pose";
+const MULTIPLAYER_WORLD_EVENT = "world-event";
+const MULTIPLAYER_WORLD_SYNC_REQUEST_EVENT = "world-sync-request";
+const MULTIPLAYER_WORLD_SYNC_STATE_EVENT = "world-sync-state";
 const REMOTE_PLAYER_POSITION_LERP = 9;
 const REMOTE_PLAYER_TURN_LERP = 10;
 const REMOTE_PLAYER_MOTION_LERP = 8;
@@ -609,6 +612,8 @@ let multiplayerLastTrackAt = 0;
 let multiplayerLastPayloadSignature = "";
 let multiplayerTrackPromise = null;
 let multiplayerBroadcastPromise = null;
+let multiplayerWorldEventOrder = 0;
+let multiplayerWorldSyncRequestOrder = 0;
 const multiplayerRoomId = getMultiplayerRoomId();
 const multiplayerClientId =
   globalThis.crypto?.randomUUID?.() ?? `client-${Math.random().toString(36).slice(2, 10)}`;
@@ -937,6 +942,46 @@ const mirrorDistanceLods = [];
 const slidingShelfCameras = [];
 const npcPromptWorldPosition = new THREE.Vector3();
 
+function getSharedInteractiveId(prefix, collection) {
+  return `${prefix}-${collection.length}`;
+}
+
+function nextMultiplayerWorldEventOrder() {
+  multiplayerWorldEventOrder += 1;
+  return multiplayerWorldEventOrder;
+}
+
+function recordMultiplayerWorldEvent(target, eventOrder) {
+  if (!target || !Number.isFinite(eventOrder) || eventOrder <= 0) {
+    return;
+  }
+
+  target.lastWorldEventOrder = eventOrder;
+}
+
+function hasMultiplayerWorldEventAfter(target, eventOrder) {
+  return (target?.lastWorldEventOrder ?? 0) > eventOrder;
+}
+
+function syncSharedSeatEffects(seat, nextOccupiedByClientId) {
+  if (!seat) {
+    return;
+  }
+
+  const previousOccupiedByClientId = seat.occupiedByClientId || "";
+  if (previousOccupiedByClientId === nextOccupiedByClientId) {
+    return;
+  }
+
+  if (previousOccupiedByClientId && seat.onStand) {
+    seat.onStand();
+  }
+
+  if (nextOccupiedByClientId && seat.onSit) {
+    seat.onSit();
+  }
+}
+
 function formatSubscriberCount(value) {
   return Math.max(0, Math.round(value)).toLocaleString();
 }
@@ -1042,6 +1087,18 @@ function getLocalMultiplayerPose() {
 }
 
 function buildLocalMultiplayerPresenceSnapshot() {
+  const carriedGoalpost = state.carriedGoalpost
+    ? {
+        id: state.carriedGoalpost.id,
+        x: roundMultiplayerNumber(state.carriedGoalpost.object.position.x),
+        y: roundMultiplayerNumber(state.carriedGoalpost.object.position.y),
+        z: roundMultiplayerNumber(state.carriedGoalpost.object.position.z),
+        rotationX: roundMultiplayerNumber(state.carriedGoalpost.object.rotation.x, 10000),
+        rotationY: roundMultiplayerNumber(state.carriedGoalpost.object.rotation.y, 10000),
+        rotationZ: roundMultiplayerNumber(state.carriedGoalpost.object.rotation.z, 10000),
+      }
+    : null;
+
   return {
     presenceKey: multiplayerPresenceKey,
     clientId: multiplayerClientId,
@@ -1058,6 +1115,7 @@ function buildLocalMultiplayerPresenceSnapshot() {
     seatSurfaceHeight: state.seatedSeat
       ? roundMultiplayerNumber(state.seatedSeat.surfaceHeight ?? DEFAULT_SEAT_SURFACE_HEIGHT)
       : null,
+    carriedGoalpost,
     updatedAt: Date.now(),
   };
 }
@@ -1074,6 +1132,13 @@ function getMultiplayerPayloadSignature(payload) {
     payload.facingYaw,
     payload.motion,
     payload.seatSurfaceHeight ?? "",
+    payload.carriedGoalpost?.id ?? "",
+    payload.carriedGoalpost?.x ?? "",
+    payload.carriedGoalpost?.y ?? "",
+    payload.carriedGoalpost?.z ?? "",
+    payload.carriedGoalpost?.rotationX ?? "",
+    payload.carriedGoalpost?.rotationY ?? "",
+    payload.carriedGoalpost?.rotationZ ?? "",
   ].join("|");
 }
 
@@ -1095,6 +1160,18 @@ function normalizeMultiplayerPresenceSnapshot(snapshot) {
   const motion = Number(snapshot.motion);
   const seatSurfaceHeight =
     snapshot.seatSurfaceHeight == null ? Number.NaN : Number(snapshot.seatSurfaceHeight);
+  const carriedGoalpost =
+    snapshot.carriedGoalpost && typeof snapshot.carriedGoalpost === "object"
+      ? {
+          id: typeof snapshot.carriedGoalpost.id === "string" ? snapshot.carriedGoalpost.id : "",
+          x: Number(snapshot.carriedGoalpost.x),
+          y: Number(snapshot.carriedGoalpost.y),
+          z: Number(snapshot.carriedGoalpost.z),
+          rotationX: Number(snapshot.carriedGoalpost.rotationX),
+          rotationY: Number(snapshot.carriedGoalpost.rotationY),
+          rotationZ: Number(snapshot.carriedGoalpost.rotationZ),
+        }
+      : null;
 
   return {
     presenceKey: typeof snapshot.presenceKey === "string" ? snapshot.presenceKey : "",
@@ -1117,6 +1194,17 @@ function normalizeMultiplayerPresenceSnapshot(snapshot) {
     facingYaw: Number.isFinite(facingYaw) ? facingYaw : Number.isFinite(yaw) ? yaw : 0,
     motion: Number.isFinite(motion) ? Math.max(0, Math.min(1.35, motion)) : 0,
     seatSurfaceHeight: Number.isFinite(seatSurfaceHeight) ? seatSurfaceHeight : DEFAULT_SEAT_SURFACE_HEIGHT,
+    carriedGoalpost:
+      carriedGoalpost &&
+      carriedGoalpost.id &&
+      Number.isFinite(carriedGoalpost.x) &&
+      Number.isFinite(carriedGoalpost.y) &&
+      Number.isFinite(carriedGoalpost.z) &&
+      Number.isFinite(carriedGoalpost.rotationX) &&
+      Number.isFinite(carriedGoalpost.rotationY) &&
+      Number.isFinite(carriedGoalpost.rotationZ)
+        ? carriedGoalpost
+        : null,
     updatedAt: Number.isFinite(Number(snapshot.updatedAt)) ? Number(snapshot.updatedAt) : 0,
   };
 }
@@ -1173,6 +1261,7 @@ function createRemotePlayerEntry(key, snapshot) {
 
   const entry = {
     key,
+    clientId: snapshot.clientId,
     profileId: snapshot.profileId,
     displayName: snapshot.displayName,
     avatar,
@@ -1204,6 +1293,7 @@ function applyRemotePlayerSnapshot(entry, snapshot, snapImmediately = false) {
   }
 
   entry.profileId = snapshot.profileId;
+  entry.clientId = snapshot.clientId;
   entry.pose = snapshot.pose;
   entry.seatSurfaceHeight = snapshot.seatSurfaceHeight ?? DEFAULT_SEAT_SURFACE_HEIGHT;
   entry.targetPosition.set(
@@ -1285,6 +1375,8 @@ function syncRemotePlayersFromPresence() {
 
   Array.from(remotePlayers.keys()).forEach((key) => {
     if (!nextKeys.has(key)) {
+      const entry = remotePlayers.get(key);
+      releaseSharedObjectsForClient(entry?.clientId ?? "");
       removeRemotePlayer(key);
     }
   });
@@ -1302,7 +1394,20 @@ function handleMultiplayerBroadcast(payload) {
   const remoteKey =
     snapshot.presenceKey ||
     (snapshot.profileId && snapshot.clientId ? `${snapshot.profileId}:${snapshot.clientId}` : snapshot.clientId);
-  if (!remoteKey || remoteKey === multiplayerPresenceKey || snapshot.clientId === multiplayerClientId) {
+  const isLocalSnapshot =
+    !remoteKey || remoteKey === multiplayerPresenceKey || snapshot.clientId === multiplayerClientId;
+
+  if (snapshot.carriedGoalpost && !isLocalSnapshot) {
+    applySharedGoalpostState({
+      ...snapshot.carriedGoalpost,
+      isCarried: true,
+      carrierClientId: snapshot.clientId,
+    }, {
+      eventOrder: nextMultiplayerWorldEventOrder(),
+    });
+  }
+
+  if (isLocalSnapshot) {
     return;
   }
 
@@ -1313,6 +1418,306 @@ function handleMultiplayerBroadcast(payload) {
   }
 
   remotePlayers.set(remoteKey, createRemotePlayerEntry(remoteKey, snapshot));
+}
+
+function findInteractiveDoorById(id) {
+  return interactiveDoors.find((door) => door.id === id) ?? null;
+}
+
+function findInteractiveSeatById(id) {
+  return interactiveSeats.find((seat) => seat.id === id) ?? null;
+}
+
+function findInteractiveGongById(id) {
+  return interactiveGongs.find((gong) => gong.id === id) ?? null;
+}
+
+function findInteractiveGoalpostById(id) {
+  return interactiveGoalposts.find((goalpost) => goalpost.id === id) ?? null;
+}
+
+function setSharedDoorState(
+  door,
+  targetAngle,
+  { snap = false, playAudio = false, eventOrder = 0 } = {},
+) {
+  if (!door || !Number.isFinite(targetAngle)) {
+    return false;
+  }
+
+  const wasClosed = Math.abs(door.targetAngle) <= 0.2 && Math.abs(door.currentAngle) <= 0.2;
+  recordMultiplayerWorldEvent(door, eventOrder);
+  door.targetAngle = targetAngle;
+
+  if (snap) {
+    door.currentAngle = targetAngle;
+    if (door.applyRotation) {
+      door.applyRotation(targetAngle);
+    } else {
+      door.pivot.rotation.y = targetAngle;
+    }
+  }
+
+  if (playAudio && wasClosed && Math.abs(targetAngle) > 0.2) {
+    playDoorOpenSound();
+  }
+
+  return true;
+}
+
+function setSharedSeatOccupancy(seat, occupiedByClientId = "", { eventOrder = 0 } = {}) {
+  if (!seat) {
+    return false;
+  }
+
+  const nextOccupiedByClientId = occupiedByClientId || "";
+  syncSharedSeatEffects(seat, nextOccupiedByClientId);
+  recordMultiplayerWorldEvent(seat, eventOrder);
+  seat.occupiedByClientId = nextOccupiedByClientId;
+
+  if (state.seatedSeat === seat && nextOccupiedByClientId !== multiplayerClientId) {
+    state.seatedSeat = null;
+    playerState.motion = 0;
+    state.velocityY = 0;
+    playerState.position.y = Math.max(playerState.position.y, PLAYER_HEIGHT);
+  }
+
+  return true;
+}
+
+function serializeGoalpostState(goalpost) {
+  return {
+    id: goalpost.id,
+    carrierClientId: goalpost.carrierClientId || "",
+    isCarried: Boolean(goalpost.isCarried),
+    x: roundMultiplayerNumber(goalpost.object.position.x),
+    y: roundMultiplayerNumber(goalpost.object.position.y),
+    z: roundMultiplayerNumber(goalpost.object.position.z),
+    rotationX: roundMultiplayerNumber(goalpost.object.rotation.x, 10000),
+    rotationY: roundMultiplayerNumber(goalpost.object.rotation.y, 10000),
+    rotationZ: roundMultiplayerNumber(goalpost.object.rotation.z, 10000),
+  };
+}
+
+function applySharedGoalpostState(goalpostState, { eventOrder = 0 } = {}) {
+  if (!goalpostState || typeof goalpostState !== "object") {
+    return false;
+  }
+
+  const goalpost = findInteractiveGoalpostById(goalpostState.id);
+  if (!goalpost) {
+    return false;
+  }
+
+  const x = Number(goalpostState.x);
+  const y = Number(goalpostState.y);
+  const z = Number(goalpostState.z);
+  const rotationX = Number(goalpostState.rotationX);
+  const rotationY = Number(goalpostState.rotationY);
+  const rotationZ = Number(goalpostState.rotationZ);
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(z) ||
+    !Number.isFinite(rotationX) ||
+    !Number.isFinite(rotationY) ||
+    !Number.isFinite(rotationZ)
+  ) {
+    return false;
+  }
+
+  const carrierClientId = typeof goalpostState.carrierClientId === "string" ? goalpostState.carrierClientId : "";
+  recordMultiplayerWorldEvent(goalpost, eventOrder);
+  goalpost.carrierClientId = carrierClientId;
+  goalpost.isCarried = Boolean(goalpostState.isCarried);
+  goalpost.canDrop = false;
+
+  if (state.carriedGoalpost === goalpost && carrierClientId !== multiplayerClientId) {
+    state.carriedGoalpost = null;
+  }
+
+  if (goalpost.isCarried) {
+    setGoalpostColliderEnabled(goalpost, false);
+    goalpost.object.position.set(x, y, z);
+    goalpost.object.rotation.set(rotationX, rotationY, rotationZ);
+    goalpost.heldPosition.copy(goalpost.object.position);
+    goalpost.previewPosition.copy(goalpost.object.position);
+    updateGoalpostInteractionPoint(goalpost);
+    return true;
+  }
+
+  const droppedPosition = new THREE.Vector3(x, 0, z);
+  setGoalpostPlacement(goalpost, droppedPosition, rotationY, { commit: true });
+  setGoalpostColliderEnabled(goalpost, true);
+  return true;
+}
+
+function serializeSharedWorldState() {
+  return {
+    doors: interactiveDoors.map((door) => ({
+      id: door.id,
+      targetAngle: roundMultiplayerNumber(door.targetAngle, 10000),
+    })),
+    seats: interactiveSeats.map((seat) => ({
+      id: seat.id,
+      occupiedByClientId: seat.occupiedByClientId || "",
+    })),
+    goalposts: interactiveGoalposts.map((goalpost) => serializeGoalpostState(goalpost)),
+  };
+}
+
+function applySharedWorldState(worldState, maxEventOrder = multiplayerWorldSyncRequestOrder) {
+  if (!worldState || typeof worldState !== "object") {
+    return;
+  }
+
+  (Array.isArray(worldState.doors) ? worldState.doors : []).forEach((doorState) => {
+    const door = findInteractiveDoorById(doorState?.id);
+    if (!door || hasMultiplayerWorldEventAfter(door, maxEventOrder)) {
+      return;
+    }
+    setSharedDoorState(door, Number(doorState?.targetAngle), { snap: true });
+  });
+
+  (Array.isArray(worldState.seats) ? worldState.seats : []).forEach((seatState) => {
+    const seat = findInteractiveSeatById(seatState?.id);
+    if (!seat || hasMultiplayerWorldEventAfter(seat, maxEventOrder)) {
+      return;
+    }
+    setSharedSeatOccupancy(seat, seatState?.occupiedByClientId ?? "");
+  });
+
+  (Array.isArray(worldState.goalposts) ? worldState.goalposts : []).forEach((goalpostState) => {
+    const goalpost = findInteractiveGoalpostById(goalpostState?.id);
+    if (!goalpost || hasMultiplayerWorldEventAfter(goalpost, maxEventOrder)) {
+      return;
+    }
+    applySharedGoalpostState(goalpostState);
+  });
+}
+
+function broadcastMultiplayerEvent(event, payload) {
+  if (!multiplayerChannel || !multiplayerSubscribed || !isSubscriberSessionReady()) {
+    return;
+  }
+
+  void multiplayerChannel.send({
+    type: "broadcast",
+    event,
+    payload,
+  }).catch((error) => {
+    console.error(`Unable to send multiplayer ${event}`, error);
+  });
+}
+
+function broadcastMultiplayerWorldEvent(kind, payload = {}, issuedAt = Date.now()) {
+  broadcastMultiplayerEvent(MULTIPLAYER_WORLD_EVENT, {
+    kind,
+    issuedAt,
+    sourceClientId: multiplayerClientId,
+    ...payload,
+  });
+}
+
+function requestMultiplayerWorldSync() {
+  multiplayerWorldSyncRequestOrder = multiplayerWorldEventOrder;
+  broadcastMultiplayerEvent(MULTIPLAYER_WORLD_SYNC_REQUEST_EVENT, {
+    requesterClientId: multiplayerClientId,
+  });
+}
+
+function sendMultiplayerWorldSyncState(targetClientId) {
+  if (!targetClientId || targetClientId === multiplayerClientId) {
+    return;
+  }
+
+  broadcastMultiplayerEvent(MULTIPLAYER_WORLD_SYNC_STATE_EVENT, {
+    targetClientId,
+    sourceClientId: multiplayerClientId,
+    issuedAt: Date.now(),
+    worldState: serializeSharedWorldState(),
+  });
+}
+
+function handleMultiplayerWorldEvent(payload) {
+  if (!payload || payload.sourceClientId === multiplayerClientId) {
+    return;
+  }
+
+  const eventOrder = nextMultiplayerWorldEventOrder();
+
+  if (payload.kind === "door") {
+    const door = findInteractiveDoorById(payload.doorId);
+    setSharedDoorState(door, Number(payload.targetAngle), {
+      eventOrder,
+      playAudio: Boolean(payload.playAudio),
+    });
+    return;
+  }
+
+  if (payload.kind === "gong-strike") {
+    const gong = findInteractiveGongById(payload.gongId);
+    if (gong) {
+      strikeGong(gong, { broadcast: false, eventOrder });
+    }
+    return;
+  }
+
+  if (payload.kind === "seat") {
+    const seat = findInteractiveSeatById(payload.seatId);
+    setSharedSeatOccupancy(seat, payload.occupiedByClientId ?? "", { eventOrder });
+    return;
+  }
+
+  if (payload.kind === "goalpost-state") {
+    applySharedGoalpostState(payload.goalpost, { eventOrder });
+  }
+}
+
+function handleMultiplayerWorldSyncRequest(payload) {
+  if (!payload || payload.requesterClientId === multiplayerClientId) {
+    return;
+  }
+
+  sendMultiplayerWorldSyncState(payload.requesterClientId);
+}
+
+function handleMultiplayerWorldSyncState(payload) {
+  if (!payload || payload.targetClientId !== multiplayerClientId) {
+    return;
+  }
+
+  applySharedWorldState(payload.worldState, multiplayerWorldSyncRequestOrder);
+}
+
+function releaseSharedObjectsForClient(clientId) {
+  if (!clientId) {
+    return;
+  }
+
+  const eventOrder = nextMultiplayerWorldEventOrder();
+
+  interactiveSeats.forEach((seat) => {
+    if (seat.occupiedByClientId === clientId) {
+      setSharedSeatOccupancy(seat, "", { eventOrder });
+    }
+  });
+
+  interactiveGoalposts.forEach((goalpost) => {
+    if (goalpost.carrierClientId !== clientId) {
+      return;
+    }
+
+    recordMultiplayerWorldEvent(goalpost, eventOrder);
+    goalpost.carrierClientId = "";
+    goalpost.isCarried = false;
+    goalpost.canDrop = false;
+
+    const droppedPosition = goalpost.object.position.clone();
+    droppedPosition.y = 0;
+    setGoalpostPlacement(goalpost, droppedPosition, goalpost.object.rotation.y, { commit: true });
+    setGoalpostColliderEnabled(goalpost, true);
+  });
 }
 
 function syncMultiplayerHud() {
@@ -1363,6 +1768,8 @@ function disconnectMultiplayerSession() {
   multiplayerLastPayloadSignature = "";
   multiplayerTrackPromise = null;
   multiplayerBroadcastPromise = null;
+  multiplayerWorldEventOrder = 0;
+  multiplayerWorldSyncRequestOrder = 0;
   multiplayerConnectionState = "offline";
 
   clearRemotePlayers();
@@ -1413,6 +1820,24 @@ function ensureMultiplayerSession() {
     }
     handleMultiplayerBroadcast(payload);
   });
+  channel.on("broadcast", { event: MULTIPLAYER_WORLD_EVENT }, ({ payload }) => {
+    if (channel !== multiplayerChannel) {
+      return;
+    }
+    handleMultiplayerWorldEvent(payload);
+  });
+  channel.on("broadcast", { event: MULTIPLAYER_WORLD_SYNC_REQUEST_EVENT }, ({ payload }) => {
+    if (channel !== multiplayerChannel) {
+      return;
+    }
+    handleMultiplayerWorldSyncRequest(payload);
+  });
+  channel.on("broadcast", { event: MULTIPLAYER_WORLD_SYNC_STATE_EVENT }, ({ payload }) => {
+    if (channel !== multiplayerChannel) {
+      return;
+    }
+    handleMultiplayerWorldSyncState(payload);
+  });
 
   channel.subscribe((status) => {
     if (channel !== multiplayerChannel) {
@@ -1425,6 +1850,7 @@ function ensureMultiplayerSession() {
       syncMultiplayerHud();
       trackLocalMultiplayerPresence(true);
       scheduleLocalMultiplayerPresence(true);
+      requestMultiplayerWorldSync();
       return;
     }
 
@@ -2721,6 +3147,7 @@ function addHangarStructure() {
     );
     architectureGroup.add(garageDoor);
     interactiveDoors.push({
+      id: getSharedInteractiveId("door", interactiveDoors),
       name: "Rear garage door",
       pivot: garageDoorCurtain,
       slab: garageDoorCurtain,
@@ -2736,6 +3163,7 @@ function addHangarStructure() {
       applyRotation: (height) => {
         garageDoorCurtain.position.y = height;
       },
+      lastWorldEventOrder: 0,
       getCollisionRects: () =>
         garageDoorCurtain.position.y > PLAYER_HEIGHT + 0.28
           ? []
@@ -3571,12 +3999,14 @@ function registerBrandonStackNpc(character, {
 function registerGong(center, discParts, promptRadius = 1.8) {
   const interactionWorld = toWorldPoint(center);
   interactiveGongs.push({
+    id: getSharedInteractiveId("gong", interactiveGongs),
     type: "gong",
     center,
     discParts,
     promptRadius,
     interactionPoint: new THREE.Vector3(interactionWorld.x, 1.2, interactionWorld.z),
     promptOffsetY: 0.2,
+    lastWorldEventOrder: 0,
   });
 }
 
@@ -11557,6 +11987,7 @@ function placePlanObject(object, center, y = 0, rotation = 0, group = furnishing
 
 function registerInteractiveGoalpost(object) {
   const goalpost = {
+    id: getSharedInteractiveId("goalpost", interactiveGoalposts),
     object,
     interactionPoint: new THREE.Vector3(),
     promptAnchor: object,
@@ -11570,6 +12001,8 @@ function registerInteractiveGoalpost(object) {
     lastPlacedPosition: object.position.clone(),
     lastValidPreviewPosition: object.position.clone(),
     lastPlacedRotation: object.rotation.y,
+    carrierClientId: "",
+    lastWorldEventOrder: 0,
   };
 
   interactiveGoalposts.push(goalpost);
@@ -11734,6 +12167,7 @@ function registerSeat(
 ) {
   const interactionWorld = toWorldPoint(center);
   interactiveSeats.push({
+    id: getSharedInteractiveId("seat", interactiveSeats),
     center,
     rotation,
     eyeHeight,
@@ -11741,6 +12175,8 @@ function registerSeat(
     surfaceHeight,
     interactionPoint: new THREE.Vector3(interactionWorld.x, eyeHeight, interactionWorld.z),
     promptOffsetY: 0.28,
+    occupiedByClientId: "",
+    lastWorldEventOrder: 0,
     ...options,
   });
 }
@@ -13307,19 +13743,27 @@ function updateCarriedGoalpostPlacement() {
   setGoalpostCarryPose(goalpost);
 }
 
-function startCarryingGoalpost(goalpost) {
-  if (state.carriedGoalpost) {
+function startCarryingGoalpost(goalpost, { broadcast = true, issuedAt = Date.now() } = {}) {
+  if (!goalpost || state.carriedGoalpost || (goalpost.isCarried && goalpost.carrierClientId !== multiplayerClientId)) {
     return;
   }
 
+  const eventOrder = nextMultiplayerWorldEventOrder();
+  recordMultiplayerWorldEvent(goalpost, eventOrder);
   goalpost.isCarried = true;
+  goalpost.carrierClientId = multiplayerClientId;
   goalpost.canDrop = false;
   state.carriedGoalpost = goalpost;
   setGoalpostColliderEnabled(goalpost, false);
   updateCarriedGoalpostPlacement();
+  if (broadcast) {
+    broadcastMultiplayerWorldEvent("goalpost-state", {
+      goalpost: serializeGoalpostState(goalpost),
+    }, issuedAt);
+  }
 }
 
-function dropCarriedGoalpost(force = false) {
+function dropCarriedGoalpost(force = false, { broadcast = true, issuedAt = Date.now() } = {}) {
   const goalpost = state.carriedGoalpost;
   if (!goalpost) {
     return false;
@@ -13329,6 +13773,7 @@ function dropCarriedGoalpost(force = false) {
     return false;
   }
 
+  const eventOrder = nextMultiplayerWorldEventOrder();
   const resolvedPosition = force
     ? goalpost.canDrop
       ? goalpost.previewPosition
@@ -13337,10 +13782,17 @@ function dropCarriedGoalpost(force = false) {
   const resolvedRotation = goalpost.lastPlacedRotation;
 
   goalpost.isCarried = false;
+  goalpost.carrierClientId = "";
   goalpost.canDrop = false;
   state.carriedGoalpost = null;
+  recordMultiplayerWorldEvent(goalpost, eventOrder);
   setGoalpostPlacement(goalpost, resolvedPosition, resolvedRotation, { commit: true });
   movePlayerOutOfDroppedGoalpost(goalpost);
+  if (broadcast) {
+    broadcastMultiplayerWorldEvent("goalpost-state", {
+      goalpost: serializeGoalpostState(goalpost),
+    }, issuedAt);
+  }
   return true;
 }
 
@@ -14399,6 +14851,7 @@ function addOther5DoubleDoorFrame() {
   architectureGroup.add(doorGroup);
 
   interactiveDoors.push({
+    id: getSharedInteractiveId("door", interactiveDoors),
     name: "Other 5 double doors",
     pivot: doorGroup,
     slab: doorGroup,
@@ -14416,6 +14869,7 @@ function addOther5DoubleDoorFrame() {
       leftPivot.rotation.y = angle;
       rightPivot.rotation.y = -angle;
     },
+    lastWorldEventOrder: 0,
     getCollisionRects() {
       return this.currentAngle >= Math.PI * 0.22 ? [] : [getBoundsRectForObject(this.slab)];
     },
@@ -14527,6 +14981,7 @@ function addInteractiveSwingDoor({
   architectureGroup.add(pivot);
 
   interactiveDoors.push({
+    id: getSharedInteractiveId("door", interactiveDoors),
     name,
     pivot,
     slab,
@@ -14541,6 +14996,7 @@ function addInteractiveSwingDoor({
     ),
     promptAnchor: pivot,
     promptOffsetY: 1,
+    lastWorldEventOrder: 0,
   });
 }
 
@@ -14608,6 +15064,7 @@ function addInteractiveHorizontalSwingDoor({
   architectureGroup.add(pivot);
 
   interactiveDoors.push({
+    id: getSharedInteractiveId("door", interactiveDoors),
     name,
     pivot,
     slab,
@@ -14622,6 +15079,7 @@ function addInteractiveHorizontalSwingDoor({
     ),
     promptAnchor: pivot,
     promptOffsetY: 1,
+    lastWorldEventOrder: 0,
   });
 }
 
@@ -14698,7 +15156,12 @@ function getNearestInteraction() {
         distance: goalpost.interactionPoint.distanceTo(playerState.position),
       })),
   ]
-    .filter(({ distance, target, type }) => distance <= getInteractionDistanceLimit(type, target))
+    .filter(({ distance, target, type }) => {
+      if (type === "seat" && target.occupiedByClientId && target.occupiedByClientId !== multiplayerClientId) {
+        return false;
+      }
+      return distance <= getInteractionDistanceLimit(type, target);
+    })
     .sort((a, b) => a.distance - b.distance)[0];
 }
 
@@ -14810,7 +15273,7 @@ function updateInteractionPrompt(elapsedTime) {
 
 function startForecastFrenzy(npc) {
   clearMovementState();
-  state.seatedSeat = null;
+  standUpFromSeat();
   playerState.motion = 0;
   state.mode = "minigame";
   unlockPointer();
@@ -14827,7 +15290,7 @@ function handleForecastFrenzyExit() {
 
 function startTylerBoard(npc) {
   clearMovementState();
-  state.seatedSeat = null;
+  standUpFromSeat();
   playerState.motion = 0;
   state.mode = "minigame";
   unlockPointer();
@@ -14844,7 +15307,7 @@ function handleTylerBoardExit() {
 
 function startNikChiefOfStaff(npc) {
   clearMovementState();
-  state.seatedSeat = null;
+  standUpFromSeat();
   playerState.motion = 0;
   state.mode = "minigame";
   unlockPointer();
@@ -14861,7 +15324,7 @@ function handleNikChiefOfStaffExit() {
 
 function startMaxClipper(npc) {
   clearMovementState();
-  state.seatedSeat = null;
+  standUpFromSeat();
   playerState.motion = 0;
   state.mode = "minigame";
   unlockPointer();
@@ -14880,7 +15343,7 @@ function handleMaxClipperExit() {
 
 function startJohnSponsorRead(npc) {
   clearMovementState();
-  state.seatedSeat = null;
+  standUpFromSeat();
   playerState.motion = 0;
   state.mode = "minigame";
   unlockPointer();
@@ -14899,7 +15362,7 @@ function handleJohnSponsorReadExit() {
 
 function startProducerMan(npc) {
   clearMovementState();
-  state.seatedSeat = null;
+  standUpFromSeat();
   playerState.motion = 0;
   state.mode = "minigame";
   unlockPointer();
@@ -14921,7 +15384,7 @@ function handleProducerManExit() {
 
 function startJordiHero(npc) {
   clearMovementState();
-  state.seatedSeat = null;
+  standUpFromSeat();
   playerState.motion = 0;
   state.mode = "minigame";
   unlockPointer();
@@ -14940,7 +15403,7 @@ function handleJordiHeroExit() {
 
 function startBrandonStack(npc) {
   clearMovementState();
-  state.seatedSeat = null;
+  standUpFromSeat();
   playerState.motion = 0;
   state.mode = "minigame";
   unlockPointer();
@@ -14957,7 +15420,13 @@ function handleBrandonStackExit() {
   syncUi();
 }
 
-function sitInSeat(seat) {
+function sitInSeat(seat, { broadcast = true, issuedAt = Date.now() } = {}) {
+  if (!seat || (seat.occupiedByClientId && seat.occupiedByClientId !== multiplayerClientId)) {
+    return false;
+  }
+
+  const eventOrder = nextMultiplayerWorldEventOrder();
+  setSharedSeatOccupancy(seat, multiplayerClientId, { eventOrder });
   state.seatedSeat = seat;
   clearMovementState();
   state.velocityY = 0;
@@ -14970,15 +15439,26 @@ function sitInSeat(seat) {
   );
   setLookAnglesFromTarget(playerState, playerState.position, lookTarget);
   playerState.facingYaw = playerState.yaw;
-  if (seat.onSit) {
-    seat.onSit();
-  }
   playerState.motion = 0;
+  if (broadcast) {
+    broadcastMultiplayerWorldEvent("seat", {
+      seatId: seat.id,
+      occupiedByClientId: multiplayerClientId,
+    }, issuedAt);
+  }
+  return true;
 }
 
 let gongAudio = null;
 
-function strikeGong(gong) {
+function strikeGong(gong, { broadcast = true, issuedAt = Date.now(), eventOrder = 0 } = {}) {
+  if (!gong) {
+    return;
+  }
+
+  const resolvedEventOrder =
+    Number.isFinite(eventOrder) && eventOrder > 0 ? eventOrder : nextMultiplayerWorldEventOrder();
+  recordMultiplayerWorldEvent(gong, resolvedEventOrder);
   if (!gongAudio) {
     gongAudio = new Audio(new URL("./Gong Sound Effect 4.mp3", import.meta.url).href);
   }
@@ -14994,6 +15474,11 @@ function strikeGong(gong) {
   gongAudio.addEventListener("playing", startAnimation, { once: true });
   gongAudio.currentTime = 1;
   gongAudio.play().catch(() => {});
+  if (broadcast) {
+    broadcastMultiplayerWorldEvent("gong-strike", {
+      gongId: gong.id,
+    }, issuedAt);
+  }
 }
 
 function updateGongAnimations() {
@@ -15016,14 +15501,13 @@ function updateGongAnimations() {
   }
 }
 
-function standUpFromSeat() {
+function standUpFromSeat({ broadcast = true, issuedAt = Date.now() } = {}) {
   if (!state.seatedSeat) {
     return;
   }
   const seat = state.seatedSeat;
-  if (seat.onStand) {
-    seat.onStand();
-  }
+  const eventOrder = nextMultiplayerWorldEventOrder();
+  setSharedSeatOccupancy(seat, "", { eventOrder });
   const fwdX = Math.sin(seat.rotation);
   const fwdZ = Math.cos(seat.rotation);
   const rightX = Math.cos(seat.rotation);
@@ -15044,6 +15528,12 @@ function standUpFromSeat() {
   playerState.position.set(standWorld.x, PLAYER_HEIGHT, standWorld.z);
   playerState.motion = 0;
   state.velocityY = 0;
+  if (broadcast) {
+    broadcastMultiplayerWorldEvent("seat", {
+      seatId: seat.id,
+      occupiedByClientId: "",
+    }, issuedAt);
+  }
 }
 
 function toggleNearestInteraction() {
@@ -15115,13 +15605,18 @@ function toggleNearestInteraction() {
 
   const nearestDoor = nearestInteraction.target;
   const isClosed = Math.abs(nearestDoor.targetAngle) <= 0.2;
-  nearestDoor.targetAngle =
-    !isClosed
-      ? 0
-      : nearestDoor.openAngle;
-  if (isClosed) {
-    playDoorOpenSound();
-  }
+  const nextTargetAngle = !isClosed ? 0 : nearestDoor.openAngle;
+  const issuedAt = Date.now();
+  const eventOrder = nextMultiplayerWorldEventOrder();
+  setSharedDoorState(nearestDoor, nextTargetAngle, {
+    eventOrder,
+    playAudio: nextTargetAngle !== 0,
+  });
+  broadcastMultiplayerWorldEvent("door", {
+    doorId: nearestDoor.id,
+    targetAngle: nextTargetAngle,
+    playAudio: nextTargetAngle !== 0,
+  }, issuedAt);
 }
 
 function getBoundsRectForObject(object) {
@@ -16681,7 +17176,7 @@ function enterWalkMode(view = "firstPerson") {
 function enterOverviewMode(shouldUnlock = true) {
   dropCarriedGoalpost(true);
   clearMovementState();
-  state.seatedSeat = null;
+  standUpFromSeat();
   playerState.motion = 0;
   playerState.position.y = Math.max(playerState.position.y, PLAYER_HEIGHT);
   state.velocityY = 0;
