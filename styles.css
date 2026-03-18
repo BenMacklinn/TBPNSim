@@ -472,8 +472,10 @@ body {
   margin: 12px 0 0;
   padding: 0;
   list-style: none;
-  max-height: min(48vh, 420px);
-  overflow: auto;
+  max-height: calc((5 * 56px) + (4 * 8px));
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
 }
 
 .leaderboard-panel__entry {
@@ -632,7 +634,7 @@ body {
   }
 
   .leaderboard-panel__list {
-    max-height: min(24vh, 180px);
+    max-height: calc((5 * 56px) + (4 * 8px));
   }
 }
 
