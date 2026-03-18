@@ -108,6 +108,12 @@
       <div id="subscribersHudDelta" class="subscribers-hud__delta">Sign in to start</div>
     </div>
 
+    <div id="multiplayerHud" class="multiplayer-hud" data-state="offline" aria-live="polite" hidden>
+      <div class="multiplayer-hud__label">Multiplayer</div>
+      <div id="multiplayerHudStatus" class="multiplayer-hud__status">Offline</div>
+      <div id="multiplayerHudCount" class="multiplayer-hud__count">0 online</div>
+    </div>
+
     <aside id="leaderboardPanel" class="leaderboard-panel" aria-live="polite">
       <div class="leaderboard-panel__eyebrow">Global</div>
       <div class="leaderboard-panel__header">
@@ -873,8 +879,8 @@
           <aside class="brandon-stack__sidebar">
             <div class="brandon-stack__stats">
               <div class="brandon-stack__stat">
-                <span class="brandon-stack__stat-label">Slices</span>
-                <strong id="brandonStackRound" class="brandon-stack__stat-value">0 / 10</strong>
+                <span class="brandon-stack__stat-label">Round</span>
+                <strong id="brandonStackRound" class="brandon-stack__stat-value">1 / 3</strong>
               </div>
               <div class="brandon-stack__stat">
                 <span class="brandon-stack__stat-label">Width</span>
@@ -886,7 +892,7 @@
               </div>
             </div>
             <div class="brandon-stack__note">
-              Each run uses one real Substack page, cut into ten contiguous slices from bottom to top. The active strip rides directly on the stack so the final page stays clean.
+              Each session runs three real Substack drafts. Every round uses ten contiguous slices from bottom to top, and each new round moves faster.
             </div>
           </aside>
 
@@ -904,7 +910,7 @@
                 <div class="brandon-stack__start-kicker">Draft Builder</div>
                 <h2 class="brandon-stack__start-title">Stack The Screenshot Strips</h2>
                 <p class="brandon-stack__start-copy">
-                  Real Substack slices sweep across the page. Drop them clean to keep Brandon's draft wide. Miss the stack once and the post is over.
+                  Clear three drafts in a row. Real Substack slices sweep across the page, and every new round speeds up.
                 </p>
                 <button id="brandonStackStartButton" type="button">Start Draft</button>
               </div>

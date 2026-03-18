@@ -111,6 +111,68 @@ const SITTING_POSE = {
   torsoRotationX: 0.06,
   shadowOpacity: 0.1,
 };
+const REMOTE_AVATAR_PALETTES = [
+  {
+    skinColor: "#cfab87",
+    suitColor: "#46515b",
+    shirtColor: "#f2efe7",
+    tieColor: "#9f6745",
+    pantColor: "#2a3137",
+    shoeColor: "#2a201b",
+    hairColor: "#30231d",
+    slickBackHair: false,
+  },
+  {
+    skinColor: "#e0b996",
+    suitColor: "#3e5260",
+    shirtColor: "#f3f0e6",
+    tieColor: "#bf6d43",
+    pantColor: "#24303a",
+    shoeColor: "#241912",
+    hairColor: "#2b211d",
+    slickBackHair: true,
+  },
+  {
+    skinColor: "#b78764",
+    suitColor: "#5b443f",
+    shirtColor: "#f2ece3",
+    tieColor: "#d29b4f",
+    pantColor: "#312520",
+    shoeColor: "#211815",
+    hairColor: "#21160f",
+    slickBackHair: false,
+  },
+  {
+    skinColor: "#d9b08f",
+    suitColor: "#40574a",
+    shirtColor: "#f1efe5",
+    tieColor: "#6f8d59",
+    pantColor: "#243229",
+    shoeColor: "#191c17",
+    hairColor: "#3b3025",
+    slickBackHair: true,
+  },
+  {
+    skinColor: "#9a6848",
+    suitColor: "#4d475e",
+    shirtColor: "#ece8df",
+    tieColor: "#be8354",
+    pantColor: "#282335",
+    shoeColor: "#1a1722",
+    hairColor: "#130e0b",
+    slickBackHair: false,
+  },
+  {
+    skinColor: "#f0c7a8",
+    suitColor: "#5d4b36",
+    shirtColor: "#f8f2e7",
+    tieColor: "#c55c40",
+    pantColor: "#2e241c",
+    shoeColor: "#1f1711",
+    hairColor: "#5a4132",
+    slickBackHair: true,
+  },
+];
 const HANGAR_REAR_PLAN_Z = PLAN_DEPTH + HANGAR_NORTH_SHIFT;
 const HANGAR_STRUCTURE_BACK_Z = 39;
 const HANGAR_EXTRA_DEPTH =
@@ -147,6 +209,13 @@ const GOALPOST_HOLD_VERTICAL_FIRST_PERSON = -1.24;
 const GOALPOST_HOLD_BASE_HEIGHT_THIRD_PERSON = 0.28;
 const GOALPOST_HOLD_TILT_X = -0.08;
 const GOALPOST_HOLD_TILT_Z = -0.16;
+const MULTIPLAYER_TRACK_INTERVAL_MS = 120;
+const MULTIPLAYER_IDLE_REFRESH_MS = 2500;
+const MULTIPLAYER_CHANNEL_PREFIX = "tbpn-sim:world";
+const REMOTE_PLAYER_POSITION_LERP = 9;
+const REMOTE_PLAYER_TURN_LERP = 10;
+const REMOTE_PLAYER_MOTION_LERP = 8;
+const DEFAULT_SEAT_SURFACE_HEIGHT = 0.52;
 
 const gltfLoader = new GLTFLoader();
 const horseStatueMaterial = new THREE.MeshStandardMaterial({
@@ -493,6 +562,9 @@ const subscribersHudPlayer = document.querySelector("#subscribersHudPlayer");
 const subscribersHudRank = document.querySelector("#subscribersHudRank");
 const subscribersHudCount = document.querySelector("#subscribersHudCount");
 const subscribersHudDelta = document.querySelector("#subscribersHudDelta");
+const multiplayerHud = document.querySelector("#multiplayerHud");
+const multiplayerHudStatus = document.querySelector("#multiplayerHudStatus");
+const multiplayerHudCount = document.querySelector("#multiplayerHudCount");
 const leaderboardList = document.querySelector("#leaderboardList");
 const leaderboardEmpty = document.querySelector("#leaderboardEmpty");
 const leaderboardMeta = document.querySelector("#leaderboardMeta");
@@ -526,6 +598,18 @@ let activeSubscriberName = "";
 let leaderboardEntries = [];
 let authMode = "login";
 let isAuthBusy = false;
+let multiplayerConnectionState = "offline";
+let multiplayerOnlineCount = 0;
+let multiplayerPresenceKey = "";
+let multiplayerChannel = null;
+let multiplayerSubscribed = false;
+let multiplayerLastTrackAt = 0;
+let multiplayerLastPayloadSignature = "";
+let multiplayerTrackPromise = null;
+const multiplayerRoomId = getMultiplayerRoomId();
+const multiplayerClientId =
+  globalThis.crypto?.randomUUID?.() ?? `client-${Math.random().toString(36).slice(2, 10)}`;
+const remotePlayers = new Map();
 const PRODUCER_MAN_CAMERA_SHOTS = {
   host: {
     positionPlan: [9.4, 25.0],
@@ -712,6 +796,7 @@ const state = {
 const clock = new THREE.Clock();
 const footstepState = { distance: 0, stride: 0.55 };
 let footstepAudioContext = null;
+let doorAudioContext = null;
 
 let bgMusic = null;
 let bgMusicMuted = false;
@@ -758,6 +843,83 @@ function playFootstep() {
   gain.connect(ctx.destination);
   source.start(ctx.currentTime);
   source.stop(ctx.currentTime + 0.06);
+}
+
+function playDoorOpenSound() {
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) {
+    return;
+  }
+  if (!doorAudioContext) {
+    doorAudioContext = new AudioContextCtor();
+  }
+  if (doorAudioContext.state === "suspended") {
+    doorAudioContext.resume().catch(() => {});
+  }
+
+  const ctx = doorAudioContext;
+  const now = ctx.currentTime;
+  const duration = 0.32;
+
+  const creakOscillator = ctx.createOscillator();
+  creakOscillator.type = "sawtooth";
+  creakOscillator.frequency.setValueAtTime(240, now);
+  creakOscillator.frequency.exponentialRampToValueAtTime(118, now + duration);
+
+  const wobbleOscillator = ctx.createOscillator();
+  wobbleOscillator.type = "sine";
+  wobbleOscillator.frequency.setValueAtTime(22, now);
+
+  const wobbleGain = ctx.createGain();
+  wobbleGain.gain.setValueAtTime(7, now);
+  wobbleGain.gain.exponentialRampToValueAtTime(1.4, now + duration);
+  wobbleOscillator.connect(wobbleGain);
+  wobbleGain.connect(creakOscillator.frequency);
+
+  const creakFilter = ctx.createBiquadFilter();
+  creakFilter.type = "bandpass";
+  creakFilter.frequency.setValueAtTime(520, now);
+  creakFilter.Q.value = 0.7;
+
+  const creakGain = ctx.createGain();
+  creakGain.gain.setValueAtTime(0.0001, now);
+  creakGain.gain.exponentialRampToValueAtTime(0.028, now + 0.03);
+  creakGain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+  creakOscillator.connect(creakFilter);
+  creakFilter.connect(creakGain);
+  creakGain.connect(ctx.destination);
+
+  const latchBuffer = ctx.createBuffer(1, Math.max(1, Math.floor(ctx.sampleRate * 0.08)), ctx.sampleRate);
+  const latchData = latchBuffer.getChannelData(0);
+  for (let i = 0; i < latchData.length; i += 1) {
+    const envelope = Math.exp(-i / (latchData.length * 0.22));
+    latchData[i] = (Math.random() * 2 - 1) * envelope;
+  }
+
+  const latchSource = ctx.createBufferSource();
+  latchSource.buffer = latchBuffer;
+
+  const latchFilter = ctx.createBiquadFilter();
+  latchFilter.type = "lowpass";
+  latchFilter.frequency.setValueAtTime(640, now);
+
+  const latchGain = ctx.createGain();
+  latchGain.gain.setValueAtTime(0.0001, now);
+  latchGain.gain.exponentialRampToValueAtTime(0.015, now + 0.01);
+  latchGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.08);
+
+  latchSource.connect(latchFilter);
+  latchFilter.connect(latchGain);
+  latchGain.connect(ctx.destination);
+
+  creakOscillator.start(now);
+  wobbleOscillator.start(now);
+  latchSource.start(now + 0.015);
+
+  creakOscillator.stop(now + duration);
+  wobbleOscillator.stop(now + duration);
+  latchSource.stop(now + 0.095);
 }
 
 const collisionRects = [];
@@ -830,6 +992,455 @@ function normalizeSubscriberProfile(profile) {
     has_subscriber_outcome: Boolean(profile?.has_subscriber_outcome),
     updated_at: typeof profile?.updated_at === "string" ? profile.updated_at : new Date(0).toISOString(),
   };
+}
+
+function getMultiplayerRoomId() {
+  const rawRoomId = new URLSearchParams(window.location.search).get("room") ?? "main";
+  const normalizedRoomId = rawRoomId
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32);
+  return normalizedRoomId || "main";
+}
+
+function roundMultiplayerNumber(value, precision = 1000) {
+  const normalizedValue = Number(value);
+  if (!Number.isFinite(normalizedValue)) {
+    return 0;
+  }
+  return Math.round(normalizedValue * precision) / precision;
+}
+
+function hashString(value = "") {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function getRemoteAvatarPalette(seed) {
+  return REMOTE_AVATAR_PALETTES[hashString(seed) % REMOTE_AVATAR_PALETTES.length];
+}
+
+function getLocalMultiplayerPose() {
+  if (state?.seatedSeat) {
+    return "seated";
+  }
+  if (state?.carriedGoalpost) {
+    return "carrying";
+  }
+  if ((playerState?.motion ?? 0) > 0.08) {
+    return "walking";
+  }
+  return "idle";
+}
+
+function buildLocalMultiplayerPresenceSnapshot() {
+  return {
+    clientId: multiplayerClientId,
+    profileId: activeSubscriberProfileKey,
+    displayName: sanitizeSubscriberName(activeSubscriberName) || "Player",
+    pose: getLocalMultiplayerPose(),
+    x: roundMultiplayerNumber(playerState.position.x),
+    y: roundMultiplayerNumber(playerState.position.y),
+    z: roundMultiplayerNumber(playerState.position.z),
+    yaw: roundMultiplayerNumber(playerState.yaw, 10000),
+    pitch: roundMultiplayerNumber(playerState.pitch, 10000),
+    facingYaw: roundMultiplayerNumber(playerState.facingYaw, 10000),
+    motion: roundMultiplayerNumber(playerState.motion),
+    seatSurfaceHeight: state.seatedSeat
+      ? roundMultiplayerNumber(state.seatedSeat.surfaceHeight ?? DEFAULT_SEAT_SURFACE_HEIGHT)
+      : null,
+    updatedAt: Date.now(),
+  };
+}
+
+function getMultiplayerPayloadSignature(payload) {
+  return [
+    payload.displayName,
+    payload.pose,
+    payload.x,
+    payload.y,
+    payload.z,
+    payload.yaw,
+    payload.pitch,
+    payload.facingYaw,
+    payload.motion,
+    payload.seatSurfaceHeight ?? "",
+  ].join("|");
+}
+
+function normalizeMultiplayerPresenceSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== "object") {
+    return null;
+  }
+
+  const x = Number(snapshot.x);
+  const y = Number(snapshot.y);
+  const z = Number(snapshot.z);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    return null;
+  }
+
+  const yaw = Number(snapshot.yaw);
+  const pitch = Number(snapshot.pitch);
+  const facingYaw = Number(snapshot.facingYaw);
+  const motion = Number(snapshot.motion);
+  const seatSurfaceHeight = Number(snapshot.seatSurfaceHeight);
+
+  return {
+    clientId: typeof snapshot.clientId === "string" ? snapshot.clientId : "",
+    profileId: typeof snapshot.profileId === "string" ? snapshot.profileId : "",
+    displayName: sanitizeSubscriberName(snapshot.displayName ?? snapshot.name ?? "") || "Player",
+    pose:
+      snapshot.pose === "seated"
+        ? "seated"
+        : snapshot.pose === "carrying"
+        ? "carrying"
+        : snapshot.pose === "walking"
+        ? "walking"
+        : "idle",
+    x,
+    y,
+    z,
+    yaw: Number.isFinite(yaw) ? yaw : 0,
+    pitch: Number.isFinite(pitch) ? pitch : 0,
+    facingYaw: Number.isFinite(facingYaw) ? facingYaw : Number.isFinite(yaw) ? yaw : 0,
+    motion: Number.isFinite(motion) ? Math.max(0, Math.min(1.35, motion)) : 0,
+    seatSurfaceHeight: Number.isFinite(seatSurfaceHeight) ? seatSurfaceHeight : DEFAULT_SEAT_SURFACE_HEIGHT,
+    updatedAt: Number.isFinite(Number(snapshot.updatedAt)) ? Number(snapshot.updatedAt) : 0,
+  };
+}
+
+function createMultiplayerNameplate(displayName) {
+  const label = sanitizeSubscriberName(displayName) || "Player";
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 128;
+  const context = canvas.getContext("2d");
+  if (context) {
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "rgba(8, 14, 24, 0.84)";
+    context.fillRect(16, 18, 480, 92);
+    context.strokeStyle = "rgba(255, 189, 117, 0.74)";
+    context.lineWidth = 4;
+    context.strokeRect(16, 18, 480, 92);
+    context.fillStyle = "#fff4dc";
+    context.font = '700 44px "Arial Rounded MT Bold", "Trebuchet MS", sans-serif';
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(label, canvas.width / 2, canvas.height / 2, 430);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const material = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthWrite: false,
+  });
+  const sprite = new THREE.Sprite(material);
+  sprite.position.set(0, 2.18, 0);
+  sprite.scale.set(1.9, 0.48, 1);
+  return sprite;
+}
+
+function disposeMultiplayerNameplate(sprite) {
+  const material = sprite?.material;
+  const texture = material?.map;
+  if (texture?.dispose) {
+    texture.dispose();
+  }
+  if (material?.dispose) {
+    material.dispose();
+  }
+}
+
+function createRemotePlayerEntry(key, snapshot) {
+  const avatar = createPlayerAvatar(getRemoteAvatarPalette(snapshot.profileId || snapshot.displayName || key));
+  const nameplate = createMultiplayerNameplate(snapshot.displayName);
+  avatar.group.add(nameplate);
+  remotePlayerGroup.add(avatar.group);
+
+  const entry = {
+    key,
+    profileId: snapshot.profileId,
+    displayName: snapshot.displayName,
+    avatar,
+    nameplate,
+    targetPosition: new THREE.Vector3(),
+    targetYaw: 0,
+    targetPitch: 0,
+    targetFacingYaw: 0,
+    targetMotion: 0,
+    pose: "idle",
+    seatSurfaceHeight: DEFAULT_SEAT_SURFACE_HEIGHT,
+    animationPhase: (hashString(key) % 628) / 100,
+  };
+
+  applyRemotePlayerSnapshot(entry, snapshot, true);
+  return entry;
+}
+
+function applyRemotePlayerSnapshot(entry, snapshot, snapImmediately = false) {
+  if (entry.displayName !== snapshot.displayName) {
+    entry.displayName = snapshot.displayName;
+    if (entry.nameplate) {
+      entry.avatar.group.remove(entry.nameplate);
+      disposeMultiplayerNameplate(entry.nameplate);
+    }
+    entry.nameplate = createMultiplayerNameplate(snapshot.displayName);
+    entry.avatar.group.add(entry.nameplate);
+  }
+
+  entry.profileId = snapshot.profileId;
+  entry.pose = snapshot.pose;
+  entry.seatSurfaceHeight = snapshot.seatSurfaceHeight ?? DEFAULT_SEAT_SURFACE_HEIGHT;
+  entry.targetPosition.set(
+    snapshot.x,
+    Math.max(0, snapshot.y - PLAYER_HEIGHT),
+    snapshot.z,
+  );
+  entry.targetYaw = snapshot.yaw;
+  entry.targetPitch = snapshot.pitch;
+  entry.targetFacingYaw = snapshot.facingYaw;
+  entry.targetMotion = snapshot.motion;
+
+  if (snapImmediately) {
+    entry.avatar.group.position.copy(entry.targetPosition);
+    entry.avatar.root.rotation.y = entry.targetFacingYaw;
+  }
+}
+
+function removeRemotePlayer(key) {
+  const entry = remotePlayers.get(key);
+  if (!entry) {
+    return;
+  }
+
+  entry.avatar.group.remove(entry.nameplate);
+  disposeMultiplayerNameplate(entry.nameplate);
+  remotePlayerGroup.remove(entry.avatar.group);
+  remotePlayers.delete(key);
+}
+
+function clearRemotePlayers() {
+  Array.from(remotePlayers.keys()).forEach((key) => {
+    removeRemotePlayer(key);
+  });
+}
+
+function collectMultiplayerPresenceSnapshots() {
+  if (!multiplayerChannel) {
+    return [];
+  }
+
+  const presenceState = multiplayerChannel.presenceState?.() ?? {};
+  return Object.entries(presenceState)
+    .map(([key, presences]) => {
+      const snapshots = (Array.isArray(presences) ? presences : [])
+        .map((presence) => normalizeMultiplayerPresenceSnapshot(presence))
+        .filter(Boolean)
+        .sort((left, right) => left.updatedAt - right.updatedAt);
+      if (snapshots.length === 0) {
+        return null;
+      }
+      return { key, snapshot: snapshots[snapshots.length - 1] };
+    })
+    .filter(Boolean);
+}
+
+function syncRemotePlayersFromPresence() {
+  const snapshots = collectMultiplayerPresenceSnapshots();
+  const nextKeys = new Set();
+
+  snapshots.forEach(({ key, snapshot }) => {
+    if (key === multiplayerPresenceKey || snapshot.clientId === multiplayerClientId) {
+      return;
+    }
+
+    nextKeys.add(key);
+
+    const existingEntry = remotePlayers.get(key);
+    if (existingEntry) {
+      applyRemotePlayerSnapshot(existingEntry, snapshot);
+      return;
+    }
+
+    remotePlayers.set(key, createRemotePlayerEntry(key, snapshot));
+  });
+
+  Array.from(remotePlayers.keys()).forEach((key) => {
+    if (!nextKeys.has(key)) {
+      removeRemotePlayer(key);
+    }
+  });
+
+  multiplayerOnlineCount = snapshots.length;
+  syncMultiplayerHud();
+}
+
+function syncMultiplayerHud() {
+  if (!multiplayerHud) {
+    return;
+  }
+
+  const sessionActive = isSubscriberSessionReady() && !isSessionGateOpen();
+  multiplayerHud.hidden = !sessionActive;
+  if (!sessionActive) {
+    return;
+  }
+
+  multiplayerHud.dataset.state = multiplayerConnectionState;
+
+  if (multiplayerHudStatus) {
+    multiplayerHudStatus.textContent =
+      multiplayerConnectionState === "connected"
+        ? "Connected"
+        : multiplayerConnectionState === "connecting"
+        ? "Connecting"
+        : multiplayerConnectionState === "error"
+        ? "Connection error"
+        : "Offline";
+  }
+
+  if (multiplayerHudCount) {
+    multiplayerHudCount.textContent =
+      multiplayerConnectionState === "connected"
+        ? `${multiplayerOnlineCount} online`
+        : multiplayerConnectionState === "error"
+        ? "Realtime unavailable"
+        : multiplayerConnectionState === "connecting"
+        ? "Joining room"
+        : "Disconnected";
+  }
+}
+
+function disconnectMultiplayerSession() {
+  const channel = multiplayerChannel;
+
+  multiplayerChannel = null;
+  multiplayerSubscribed = false;
+  multiplayerPresenceKey = "";
+  multiplayerOnlineCount = 0;
+  multiplayerLastTrackAt = 0;
+  multiplayerLastPayloadSignature = "";
+  multiplayerTrackPromise = null;
+  multiplayerConnectionState = "offline";
+
+  clearRemotePlayers();
+
+  if (channel) {
+    void supabase.removeChannel(channel);
+  }
+
+  syncMultiplayerHud();
+}
+
+function ensureMultiplayerSession() {
+  if (!isSubscriberSessionReady()) {
+    disconnectMultiplayerSession();
+    return;
+  }
+
+  const nextPresenceKey = `${activeSubscriberProfileKey}:${multiplayerClientId}`;
+  if (multiplayerChannel && multiplayerPresenceKey === nextPresenceKey) {
+    scheduleLocalMultiplayerPresence(true);
+    return;
+  }
+
+  disconnectMultiplayerSession();
+  multiplayerPresenceKey = nextPresenceKey;
+  multiplayerConnectionState = "connecting";
+  syncMultiplayerHud();
+
+  const channel = supabase.channel(`${MULTIPLAYER_CHANNEL_PREFIX}:${multiplayerRoomId}`, {
+    config: {
+      presence: {
+        key: multiplayerPresenceKey,
+      },
+    },
+  });
+
+  multiplayerChannel = channel;
+  channel.on("presence", { event: "sync" }, () => {
+    if (channel !== multiplayerChannel) {
+      return;
+    }
+    syncRemotePlayersFromPresence();
+  });
+
+  channel.subscribe((status) => {
+    if (channel !== multiplayerChannel) {
+      return;
+    }
+
+    if (status === "SUBSCRIBED") {
+      multiplayerSubscribed = true;
+      multiplayerConnectionState = "connected";
+      syncMultiplayerHud();
+      scheduleLocalMultiplayerPresence(true);
+      return;
+    }
+
+    if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+      multiplayerSubscribed = false;
+      multiplayerConnectionState = "error";
+      multiplayerOnlineCount = 0;
+      clearRemotePlayers();
+      syncMultiplayerHud();
+      return;
+    }
+
+    if (status === "CLOSED") {
+      multiplayerSubscribed = false;
+      multiplayerConnectionState = "offline";
+      multiplayerOnlineCount = 0;
+      clearRemotePlayers();
+      syncMultiplayerHud();
+    }
+  });
+}
+
+function scheduleLocalMultiplayerPresence(force = false) {
+  if (!multiplayerChannel || !multiplayerSubscribed || !isSubscriberSessionReady()) {
+    return;
+  }
+
+  const payload = buildLocalMultiplayerPresenceSnapshot();
+  const payloadSignature = getMultiplayerPayloadSignature(payload);
+  const now = performance.now();
+  const changed = payloadSignature !== multiplayerLastPayloadSignature;
+  const idleRefreshDue = now - multiplayerLastTrackAt >= MULTIPLAYER_IDLE_REFRESH_MS;
+  const rateLimitPassed = now - multiplayerLastTrackAt >= MULTIPLAYER_TRACK_INTERVAL_MS;
+  if (!force && !idleRefreshDue && (!changed || !rateLimitPassed)) {
+    return;
+  }
+
+  if (multiplayerTrackPromise) {
+    return;
+  }
+
+  multiplayerTrackPromise = multiplayerChannel.track(payload)
+    .then(() => {
+      multiplayerLastTrackAt = performance.now();
+      multiplayerLastPayloadSignature = payloadSignature;
+      if (multiplayerConnectionState !== "connected") {
+        multiplayerConnectionState = "connected";
+        syncMultiplayerHud();
+      }
+    })
+    .catch((error) => {
+      console.error("Unable to publish multiplayer presence", error);
+      multiplayerConnectionState = "error";
+      syncMultiplayerHud();
+    })
+    .finally(() => {
+      multiplayerTrackPromise = null;
+    });
 }
 
 function clearActiveSubscriberProfile() {
@@ -1109,6 +1720,7 @@ async function ensureSubscriberProfile(user, preferredDisplayName = "") {
 
 async function loadSubscriberProfileFromSession(session, preferredDisplayName = "") {
   if (!session?.user) {
+    disconnectMultiplayerSession();
     clearActiveSubscriberProfile();
     await refreshSubscriberViews();
     openSessionGate();
@@ -1127,6 +1739,7 @@ async function loadSubscriberProfileFromSession(session, preferredDisplayName = 
   }
   closeSessionGate();
   await refreshSubscriberViews();
+  ensureMultiplayerSession();
 }
 
 async function persistSubscriberProgress() {
@@ -1159,6 +1772,7 @@ async function persistSubscriberProgress() {
 async function handleSupabaseSession(session) {
   try {
     if (!session?.user) {
+      disconnectMultiplayerSession();
       setAuthMode("login");
       clearActiveSubscriberProfile();
       if (sessionGatePasswordInput) {
@@ -1172,6 +1786,7 @@ async function handleSupabaseSession(session) {
     await loadSubscriberProfileFromSession(session);
   } catch (error) {
     console.error("Unable to load Supabase session", error);
+    disconnectMultiplayerSession();
     setAuthMode("login");
     clearActiveSubscriberProfile();
     await refreshSubscriberViews();
@@ -1192,6 +1807,7 @@ async function initializeSupabaseAuth() {
     if (data?.session) {
       await handleSupabaseSession(data.session);
     } else {
+      disconnectMultiplayerSession();
       setAuthMode("login");
       clearActiveSubscriberProfile();
       await refreshSubscriberViews();
@@ -1199,6 +1815,7 @@ async function initializeSupabaseAuth() {
     }
   } catch (error) {
     console.error("Unable to initialize auth", error);
+    disconnectMultiplayerSession();
     setAuthMode("login");
     clearActiveSubscriberProfile();
     await refreshSubscriberViews();
@@ -1385,11 +2002,13 @@ const brandonStack = new BrandonStackOverlay({
 const architectureGroup = new THREE.Group();
 const labelGroup = new THREE.Group();
 const furnishingGroup = new THREE.Group();
+const remotePlayerGroup = new THREE.Group();
 const playerAvatar = createPlayerAvatar();
 
 scene.add(architectureGroup);
 scene.add(furnishingGroup);
 scene.add(labelGroup);
+scene.add(remotePlayerGroup);
 scene.add(playerAvatar.group);
 
 buildEnvironment();
@@ -1413,6 +2032,7 @@ window.addEventListener("resize", onResize);
 window.addEventListener("keydown", onKeyDown);
 window.addEventListener("keyup", onKeyUp);
 window.addEventListener("blur", clearMovementState);
+window.addEventListener("beforeunload", disconnectMultiplayerSession);
 if (sessionGateForm) {
   sessionGateForm.addEventListener("submit", (event) => {
     void handleSessionGateSubmit(event);
@@ -14415,10 +15035,14 @@ function toggleNearestInteraction() {
   }
 
   const nearestDoor = nearestInteraction.target;
+  const isClosed = Math.abs(nearestDoor.targetAngle) <= 0.2;
   nearestDoor.targetAngle =
-    Math.abs(nearestDoor.targetAngle) > 0.2
+    !isClosed
       ? 0
       : nearestDoor.openAngle;
+  if (isClosed) {
+    playDoorOpenSound();
+  }
 }
 
 function getBoundsRectForObject(object) {
@@ -15575,6 +16199,68 @@ function angleDifference(current, target) {
   return Math.atan2(Math.sin(target - current), Math.cos(target - current));
 }
 
+function animateRemotePlayers(delta, elapsedTime) {
+  const positionStep = Math.min(1, delta * REMOTE_PLAYER_POSITION_LERP);
+  const turnStep = Math.min(1, delta * REMOTE_PLAYER_TURN_LERP);
+  const motionStep = Math.min(1, delta * REMOTE_PLAYER_MOTION_LERP);
+
+  remotePlayers.forEach((entry) => {
+    entry.avatar.group.position.lerp(entry.targetPosition, positionStep);
+    entry.avatar.root.rotation.y += angleDifference(
+      entry.avatar.root.rotation.y,
+      entry.targetFacingYaw,
+    ) * turnStep;
+
+    const visibleMotion = THREE.MathUtils.lerp(
+      entry.avatar.userData.motion ?? 0,
+      entry.targetMotion,
+      motionStep,
+    );
+    entry.avatar.userData.motion = visibleMotion;
+
+    if (entry.pose === "seated") {
+      entry.avatar.leftArmPivot.rotation.x = -0.18;
+      entry.avatar.rightArmPivot.rotation.x = -0.18;
+      entry.avatar.leftArmPivot.rotation.z = 0;
+      entry.avatar.rightArmPivot.rotation.z = 0;
+      entry.avatar.leftLegPivot.rotation.x = SITTING_POSE.legRotationX;
+      entry.avatar.rightLegPivot.rotation.x = SITTING_POSE.legRotationX;
+      entry.avatar.leftKneePivot.rotation.x = SITTING_POSE.kneeRotationX;
+      entry.avatar.rightKneePivot.rotation.x = SITTING_POSE.kneeRotationX;
+      entry.avatar.torso.rotation.x = SITTING_POSE.torsoRotationX;
+      entry.avatar.torso.rotation.z = 0;
+      entry.avatar.root.position.y = (entry.seatSurfaceHeight ?? DEFAULT_SEAT_SURFACE_HEIGHT) - 0.6;
+      entry.avatar.head.rotation.x = SITTING_POSE.headRotationX;
+      entry.avatar.head.rotation.y = SITTING_POSE.headRotationY;
+      entry.avatar.shadow.scale.setScalar(0.92);
+      entry.avatar.shadow.material.opacity = 0.12;
+      return;
+    }
+
+    const stride = Math.sin((elapsedTime + entry.animationPhase) * (7 + visibleMotion * 5)) * visibleMotion;
+    entry.avatar.leftArmPivot.rotation.x = stride * 0.85;
+    entry.avatar.rightArmPivot.rotation.x = -stride * 0.85;
+    entry.avatar.leftArmPivot.rotation.z = 0;
+    entry.avatar.rightArmPivot.rotation.z = 0;
+    entry.avatar.leftLegPivot.rotation.x = -stride * 0.72;
+    entry.avatar.rightLegPivot.rotation.x = stride * 0.72;
+    entry.avatar.leftKneePivot.rotation.x = 0;
+    entry.avatar.rightKneePivot.rotation.x = 0;
+    entry.avatar.torso.rotation.x = 0;
+    entry.avatar.torso.rotation.z = stride * 0.08;
+    entry.avatar.root.position.y = 0;
+    entry.avatar.head.rotation.x = Math.max(-0.25, Math.min(0.25, entry.targetPitch * 0.5));
+    entry.avatar.head.rotation.y = Math.max(
+      -0.45,
+      Math.min(0.45, angleDifference(entry.targetFacingYaw, entry.targetYaw) * 0.4),
+    );
+    const airborne = Math.max(0, entry.targetPosition.y);
+    const shadowScale = 1 - Math.min(0.18, airborne * 0.08);
+    entry.avatar.shadow.scale.setScalar(shadowScale);
+    entry.avatar.shadow.material.opacity = 0.18 * (1 - Math.min(0.5, airborne * 0.24));
+  });
+}
+
 function isObjectWithinRoot(object, root) {
   for (let node = object; node; node = node.parent) {
     if (node === root) {
@@ -15756,6 +16442,8 @@ function animate() {
   });
 
   syncPlayerPresentation(delta, elapsedTime);
+  animateRemotePlayers(delta, elapsedTime);
+  scheduleLocalMultiplayerPresence();
   updateCarriedGoalpostPlacement();
   updateInteractionPrompt(elapsedTime);
   forecastFrenzy.update(delta, elapsedTime);
@@ -15934,6 +16622,7 @@ function syncUi() {
   const gameplayHudVisible = state.mode !== "minigame" && sessionActive;
 
   labelGroup.visible = state.mode === "overview" && sessionActive;
+  remotePlayerGroup.visible = sessionActive;
   if (subscribersHud) {
     subscribersHud.hidden = !gameplayHudVisible;
   }
@@ -15949,6 +16638,7 @@ function syncUi() {
     walkLogoHud.setAttribute("aria-hidden", visible ? "false" : "true");
   }
   syncWalkKeyHud();
+  syncMultiplayerHud();
   if (state.mode !== "walk" || !sessionActive) {
     hideInteractionPrompt();
   }

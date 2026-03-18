@@ -8,11 +8,13 @@ const TOPBAR_HEIGHT = 58;
 const PAPER_BOTTOM = 1328;
 const IMAGE_SLICE_COUNT = 10;
 const STACK_TARGET = IMAGE_SLICE_COUNT;
+const TOTAL_ROUNDS = 3;
 const RESULT_DELAY = 2;
 const MOVING_SLICE_GAP = 4;
 const DROP_SPEED = 1800;
 const BASE_MOVE_SPEED = 280;
 const MOVE_SPEED_STEP = 26;
+const ROUND_SPEED_BONUS = 90;
 const TRAVEL_MARGIN = 250;
 const INTRO_FADE_OUT = 0.22;
 const INTRO_HOLD = 0.12;
@@ -87,64 +89,98 @@ function getQualityLabel(score) {
   return "Off the rails";
 }
 
-function buildResult({ cleared, score, stackedSlices, perfectDrops, averageAlignment, widthRatio }) {
-  const polishScore = clamp(averageAlignment * 0.56 + widthRatio * 0.44, 0, 1);
-  const depthScore = clamp(stackedSlices / STACK_TARGET, 0, 1);
-  const openRate = Math.round(clamp(24 + polishScore * 44 + depthScore * 10 + perfectDrops * 2.4, 16, 82));
-  const subscriberGain = Math.max(
-    4,
-    Math.round(10 + polishScore * 48 + depthScore * 34 + perfectDrops * 5 - (1 - widthRatio) * 32),
-  );
-  const draftQuality = getQualityLabel(polishScore);
+function getSubscriberPerformance({ averageAlignment, widthRatio, stackedSlices, cleared }) {
+  const depthRatio = clamp(stackedSlices / STACK_TARGET, 0, 1);
 
-  let title = "Draft Survived";
-  if (cleared && polishScore >= 0.92) {
-    title = "Inbox Rocket";
-  } else if (cleared && polishScore >= 0.84) {
-    title = "Clean Publish";
-  } else if (!cleared) {
-    title = "Draft Missed";
-  }
-
-  const summary = cleared
-    ? `Brandon shipped ${stackedSlices} slices and kept ${formatPercent(widthRatio * 100)} of the column intact.`
-    : `The stack snapped after ${stackedSlices} clean drops. ${formatPercent(widthRatio * 100)} of the page width survived.`;
-
-  return {
-    title,
-    summary,
-    chips: [
-      `Score ${score}`,
-      `Perfect drops ${perfectDrops}`,
-      `Avg align ${formatPercent(averageAlignment * 100)}`,
-      `Width left ${formatPercent(widthRatio * 100)}`,
-    ],
-    metrics: [
-      {
-        label: "Open rate",
-        value: `${openRate}%`,
-        note: openRate >= 60 ? "Strong headline energy" : "Respectable, but not scorching",
-      },
-      {
-        label: "Subscriber gain",
-        value: `+${subscriberGain}`,
-        note: subscriberGain >= 70 ? "Net new readers showed up" : "A few fresh signups, mostly loyalists",
-      },
-      {
-        label: "Draft quality",
-        value: draftQuality,
-        note: `${formatPercent(polishScore * 100)} clean-score on the final page`,
-      },
-    ],
-  };
-}
-
-function getSubscriberPerformance({ averageAlignment, widthRatio, stackedSlices }) {
   return clamp(
-    averageAlignment * 0.35 + widthRatio * 0.35 + clamp(stackedSlices / STACK_TARGET, 0, 1) * 0.3,
+    averageAlignment * 0.3 +
+      widthRatio * 0.25 +
+      depthRatio * 0.2 +
+      (cleared ? 0.18 : -0.08) -
+      (1 - widthRatio) * 0.22 -
+      (1 - depthRatio) * 0.18,
     0,
     1,
   );
+}
+
+function buildSessionResult(roundResults) {
+  const completedRounds = roundResults.length;
+  const totalScore = roundResults.reduce((sum, round) => sum + round.score, 0);
+  const totalSlices = roundResults.reduce((sum, round) => sum + round.stackedSlices, 0);
+  const totalPerfectDrops = roundResults.reduce((sum, round) => sum + round.perfectDrops, 0);
+  const clearedRounds = roundResults.filter((round) => round.cleared).length;
+  const weightingTotal = roundResults.reduce((sum, round) => sum + Math.max(1, round.stackedSlices), 0);
+  const averageAlignment = weightingTotal
+    ? roundResults.reduce((sum, round) => sum + round.averageAlignment * Math.max(1, round.stackedSlices), 0) / weightingTotal
+    : 0.42;
+  const averageWidth =
+    completedRounds > 0 ? roundResults.reduce((sum, round) => sum + round.widthRatio, 0) / completedRounds : 0.42;
+  const polishScore = clamp(averageAlignment * 0.56 + averageWidth * 0.44, 0, 1);
+  const openRate = Math.round(clamp(20 + polishScore * 34 + clearedRounds * 10 + totalPerfectDrops * 1.8, 14, 86));
+  const subscriberGain = Math.max(
+    4,
+    Math.round(8 + polishScore * 40 + clearedRounds * 18 + totalPerfectDrops * 3 - (TOTAL_ROUNDS - clearedRounds) * 14),
+  );
+  const weightedPerformanceTotal = roundResults.reduce((sum, _round, index) => sum + 1 + index * 0.15, 0);
+  const performance = weightedPerformanceTotal
+    ? clamp(
+        roundResults.reduce((sum, round, index) => sum + round.performance * (1 + index * 0.15), 0) /
+          weightedPerformanceTotal,
+        0,
+        1,
+      )
+    : 0;
+
+  let title = "Draft Marathon";
+  if (clearedRounds === TOTAL_ROUNDS && polishScore >= 0.92) {
+    title = "Inbox Hat Trick";
+  } else if (clearedRounds === TOTAL_ROUNDS) {
+    title = "Triple Publish";
+  } else if (clearedRounds >= 2) {
+    title = "Two Drafts Landed";
+  } else if (clearedRounds === 1) {
+    title = "One Draft Stuck";
+  } else {
+    title = "Draft Spiral";
+  }
+
+  const summary =
+    completedRounds >= TOTAL_ROUNDS
+      ? `Brandon ran ${TOTAL_ROUNDS} drafts, cleared ${clearedRounds}, and stacked ${totalSlices} slices total.`
+      : `Brandon only finished ${completedRounds} of ${TOTAL_ROUNDS} drafts and stacked ${totalSlices} slices.`;
+
+  return {
+    performance,
+    resultData: {
+      title,
+      summary,
+      chips: [
+        `Score ${totalScore}`,
+        `Rounds ${clearedRounds}/${TOTAL_ROUNDS}`,
+        `Perfect drops ${totalPerfectDrops}`,
+        `Avg align ${formatPercent(averageAlignment * 100)}`,
+        `Width left ${formatPercent(averageWidth * 100)}`,
+      ],
+      metrics: [
+        {
+          label: "Open rate",
+          value: `${openRate}%`,
+          note: clearedRounds >= 2 ? "Readers stayed through the full run" : "The run lost momentum fast",
+        },
+        {
+          label: "Subscriber gain",
+          value: `+${subscriberGain}`,
+          note: clearedRounds === TOTAL_ROUNDS ? "Three drafts kept the feed alive" : "Some rounds bled momentum",
+        },
+        {
+          label: "Draft quality",
+          value: getQualityLabel(polishScore),
+          note: `${formatPercent(polishScore * 100)} clean-score across all three rounds`,
+        },
+      ],
+    },
+  };
 }
 
 class BrandonStackAudio {
@@ -276,6 +312,8 @@ export class BrandonStackOverlay {
     this.stackedSlices = 0;
     this.perfectDrops = 0;
     this.alignmentHistory = [];
+    this.roundIndex = 0;
+    this.roundResults = [];
     this.flash = 0;
     this.flashColor = "#54d5a2";
     this.fadeAlpha = 0;
@@ -455,7 +493,7 @@ export class BrandonStackOverlay {
     };
   }
 
-  prepareSession() {
+  prepareRound() {
     this.score = 0;
     this.stackedSlices = 0;
     this.perfectDrops = 0;
@@ -465,11 +503,19 @@ export class BrandonStackOverlay {
     this.feedback = { text: "", tone: "neutral", remaining: 0 };
     this.resultData = null;
     this.pendingResult = null;
-    this.subscriberResult = null;
     this.fragments = [];
     this.prepareDeck();
     this.stack = [];
     this.spawnNextSlice();
+  }
+
+  prepareSession() {
+    this.roundIndex = 0;
+    this.roundResults = [];
+    this.resultData = null;
+    this.pendingResult = null;
+    this.subscriberResult = null;
+    this.prepareRound();
   }
 
   spawnNextSlice() {
@@ -487,7 +533,7 @@ export class BrandonStackOverlay {
       strip,
       level,
       direction,
-      speed: BASE_MOVE_SPEED + this.stackedSlices * MOVE_SPEED_STEP,
+      speed: BASE_MOVE_SPEED + this.roundIndex * ROUND_SPEED_BONUS + this.stackedSlices * MOVE_SPEED_STEP,
       moving: true,
     });
   }
@@ -510,6 +556,8 @@ export class BrandonStackOverlay {
       this.stackedSlices = 0;
       this.perfectDrops = 0;
       this.alignmentHistory = [];
+      this.roundIndex = 0;
+      this.roundResults = [];
       this.flash = 0;
       this.flashColor = "#54d5a2";
       this.feedback = { text: "", tone: "neutral", remaining: 0 };
@@ -586,28 +634,41 @@ export class BrandonStackOverlay {
     });
   }
 
-  showResult(cleared) {
+  collectRoundResult(cleared) {
     const widthRatio = this.getCurrentWidthRatio();
     const averageAlignment = this.alignmentHistory.length ? this.getAverageAlignment() : cleared ? 1 : 0.42;
 
-    this.phase = "result";
-    this.resultData = buildResult({
+    const performance = getSubscriberPerformance({
+      averageAlignment,
+      widthRatio,
+      stackedSlices: this.stackedSlices,
+      cleared,
+    });
+
+    const roundResult = {
       cleared,
       score: this.score,
       stackedSlices: this.stackedSlices,
       perfectDrops: this.perfectDrops,
       averageAlignment,
       widthRatio,
-    });
+      performance,
+    };
+
+    this.roundResults.push(roundResult);
+    return roundResult;
+  }
+
+  showResult() {
+    const sessionResult = buildSessionResult(this.roundResults);
+
+    this.phase = "result";
+    this.resultData = sessionResult.resultData;
     this.subscriberResult =
       typeof this.onRunComplete === "function"
         ? this.onRunComplete({
             gameId: "brandonStack",
-            performance: getSubscriberPerformance({
-              averageAlignment,
-              widthRatio,
-              stackedSlices: this.stackedSlices,
-            }),
+            performance: sessionResult.performance,
           })
         : null;
 
@@ -629,6 +690,22 @@ export class BrandonStackOverlay {
       this.setFeedback("Draft lost", "bad", 1.1);
     }
 
+    this.sync();
+  }
+
+  advanceRound(cleared) {
+    const roundNumber = this.roundIndex + 1;
+    this.collectRoundResult(cleared);
+
+    if (roundNumber >= TOTAL_ROUNDS) {
+      this.showResult();
+      return;
+    }
+
+    this.roundIndex += 1;
+    this.phase = "ready";
+    this.prepareRound();
+    this.setFeedback(`Round ${roundNumber} locked. Round ${this.roundIndex + 1} is faster.`, "good", 1.2);
     this.sync();
   }
 
@@ -823,7 +900,7 @@ export class BrandonStackOverlay {
       if (this.pendingResult.remaining === 0) {
         const { cleared } = this.pendingResult;
         this.pendingResult = null;
-        this.showResult(cleared);
+        this.advanceRound(cleared);
         return;
       }
     }
@@ -924,7 +1001,7 @@ export class BrandonStackOverlay {
     }
 
     if (this.roundElement) {
-      this.roundElement.textContent = `${this.stackedSlices} / ${STACK_TARGET}`;
+      this.roundElement.textContent = `${Math.min(this.roundIndex + 1, TOTAL_ROUNDS)} / ${TOTAL_ROUNDS}`;
     }
 
     if (this.widthElement) {
@@ -946,17 +1023,17 @@ export class BrandonStackOverlay {
     }
 
     if (this.footerElement) {
-      let footerText = `Substack${this.activeImageIndex + 1} • slice ${Math.min(this.stackedSlices + 1, STACK_TARGET)} of ${STACK_TARGET}`;
+      let footerText = `Round ${this.roundIndex + 1} / ${TOTAL_ROUNDS} • Substack${this.activeImageIndex + 1} • slice ${Math.min(this.stackedSlices + 1, STACK_TARGET)} of ${STACK_TARGET}`;
       if (this.phase === "ready") {
         footerText = this.loadError
           ? "Screenshot assets failed to load."
           : this.assetsReady
-            ? `Press Space, Enter, or click to start Substack${this.activeImageIndex + 1}.`
+            ? `Press Space, Enter, or click to start round ${this.roundIndex + 1} of ${TOTAL_ROUNDS}.`
             : "Loading Brandon's screenshots...";
       } else if (this.phase === "postrun") {
-        footerText = "Holding the draft for a beat...";
+        footerText = `Locking round ${this.roundIndex + 1}...`;
       } else if (this.phase === "result") {
-        footerText = "Press Space or Enter to write another draft.";
+        footerText = "Press Space or Enter to replay all three rounds.";
       }
       this.footerElement.textContent = footerText;
     }

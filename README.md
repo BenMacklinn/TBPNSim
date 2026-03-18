@@ -15,6 +15,7 @@ Then open `http://localhost:4173`.
 ## Features
 
 - 3D floorplan walkthrough with walls, rooms, and furnishings
+- Supabase-backed multiplayer presence so logged-in players can see each other live
 - Forecast Frenzy minigame (press E on Ben at the greenscreen)
 - Chat NPCs including Tyler at the east desk
 - Seated characters at double-layer desks and stage area
