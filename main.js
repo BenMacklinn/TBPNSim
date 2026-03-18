@@ -40,6 +40,11 @@ const PROJECTOR_HLS_MIME_TYPE = "application/vnd.apple.mpegurl";
 const PROJECTOR_YOUTUBE_CHANNEL_ID = "UC-DRzaGnL_vtBUpCFH5M0tg";
 const PROJECTOR_SCREEN_WIDTH = 3.8;
 const PROJECTOR_SCREEN_HEIGHT = 2.62;
+const FRONT_ROOM_TV_SCREEN_WIDTH = 1.04;
+const FRONT_ROOM_TV_SCREEN_HEIGHT = 0.58;
+const PROJECTOR_VIEWING_AREA_MIN_PLAN_X = 0.45;
+const PROJECTOR_VIEWING_AREA_MAX_PLAN_X = 12.55;
+const PROJECTOR_VIEWING_AREA_MIN_PLAN_Z = 24.35;
 const PROJECTOR_YOUTUBE_EMBED_WIDTH = 1280;
 const PROJECTOR_YOUTUBE_EMBED_HEIGHT = Math.round(
   PROJECTOR_YOUTUBE_EMBED_WIDTH * (PROJECTOR_SCREEN_HEIGHT / PROJECTOR_SCREEN_WIDTH),
@@ -636,10 +641,10 @@ let projectorStreamMode = "fallback";
 let projectorStatusTimer = null;
 let projectorStatusRequest = null;
 let projectorHlsController = null;
-let projectorYoutubeVideoId = "";
-let projectorCssObject = null;
-let projectorCssIframe = null;
+let projectorPrimaryDisplay = null;
+const projectorMirroredDisplays = [];
 let projectorYoutubeAudioUnlocked = false;
+let projectorAudioAudible = false;
 const multiplayerRoomId = getMultiplayerRoomId();
 const multiplayerClientId =
   globalThis.crypto?.randomUUID?.() ?? `client-${Math.random().toString(36).slice(2, 10)}`;
@@ -769,6 +774,7 @@ const walkLookTarget = new THREE.Vector3(
 );
 const cameraCollisionRaycaster = new THREE.Raycaster();
 cameraCollisionRaycaster.layers.enable(HANGAR_LIGHTING_LAYER);
+const projectorVisibilityRaycaster = new THREE.Raycaster();
 const goalpostPlacementRaycaster = new THREE.Raycaster();
 const goalpostPlacementPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const cameraLookTarget = new THREE.Vector3();
@@ -796,6 +802,11 @@ const goalpostCarryRightGripWorld = new THREE.Vector3();
 const goalpostCarryTargetLocal = new THREE.Vector3();
 const goalpostCarryRotationEuler = new THREE.Euler(0, 0, 0, "XYZ");
 const goalpostCarryQuaternion = new THREE.Quaternion();
+const projectorDisplayCameraPosition = new THREE.Vector3();
+const projectorDisplayTargetPoint = new THREE.Vector3();
+const projectorDisplayRayDirection = new THREE.Vector3();
+const projectorDisplayNormal = new THREE.Vector3();
+const projectorDisplayQuaternion = new THREE.Quaternion();
 const lookEuler = new THREE.Euler(0, 0, 0, "YXZ");
 let isPointerLocked = false;
 let walkHudJumpActive = false;
@@ -1064,11 +1075,7 @@ function buildProjectorYoutubeEmbedUrl(videoId = "") {
   return `https://www.youtube.com/embed/live_stream?${params.toString()}`;
 }
 
-function initializeProjectorYoutubeOverlay(parent) {
-  if (!parent || projectorCssObject) {
-    return;
-  }
-
+function createProjectorYoutubeDisplay(parent, mesh, width, height, title, frontDirectionLocal = new THREE.Vector3(0, 0, 1)) {
   const shell = document.createElement("div");
   shell.className = "projector-youtube-shell";
   shell.style.width = `${PROJECTOR_YOUTUBE_EMBED_WIDTH}px`;
@@ -1079,65 +1086,129 @@ function initializeProjectorYoutubeOverlay(parent) {
   iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
   iframe.referrerPolicy = "strict-origin-when-cross-origin";
   iframe.setAttribute("allowfullscreen", "");
-  iframe.setAttribute("title", "TBPN live projector");
+  iframe.setAttribute("title", title);
   iframe.tabIndex = -1;
-  iframe.addEventListener("load", () => {
-    if (!projectorYoutubeAudioUnlocked) {
-      return;
-    }
-    window.setTimeout(() => {
-      syncProjectorYoutubeAudioState();
-    }, 250);
-  });
   shell.append(iframe);
 
   const cssObject = new CSS3DObject(shell);
-  cssObject.position.copy(projectorScreenMesh.position);
-  cssObject.rotation.copy(projectorScreenMesh.rotation);
+  cssObject.position.copy(mesh.position);
+  cssObject.rotation.copy(mesh.rotation);
   cssObject.scale.set(
-    PROJECTOR_SCREEN_WIDTH / PROJECTOR_YOUTUBE_EMBED_WIDTH,
-    PROJECTOR_SCREEN_HEIGHT / PROJECTOR_YOUTUBE_EMBED_HEIGHT,
+    width / PROJECTOR_YOUTUBE_EMBED_WIDTH,
+    height / PROJECTOR_YOUTUBE_EMBED_HEIGHT,
     1,
   );
   cssObject.visible = false;
   parent.add(cssObject);
 
-  projectorCssObject = cssObject;
-  projectorCssIframe = iframe;
+  const display = {
+    cssObject,
+    cssIframe: iframe,
+    youtubeVideoId: "",
+    mesh,
+    width,
+    height,
+    frontDirectionLocal: frontDirectionLocal.clone().normalize(),
+    surfaceOffset: 0.02,
+    requestedVisible: false,
+    requiresViewingArea: false,
+  };
+  if (mesh.geometry) {
+    mesh.geometry.computeBoundingBox();
+    const bounds = mesh.geometry.boundingBox;
+    if (bounds) {
+      display.surfaceOffset += Math.max(
+        bounds.max.z - bounds.min.z,
+        bounds.max.x - bounds.min.x,
+        bounds.max.y - bounds.min.y,
+      ) * 0.01;
+      display.surfaceOffset += (bounds.max.z - bounds.min.z) * 0.5;
+    }
+  }
+  iframe.addEventListener("load", () => {
+    window.setTimeout(() => {
+      syncProjectorDisplayPlayback(display, display === projectorPrimaryDisplay);
+    }, 250);
+  });
+  return display;
 }
 
-function hideProjectorYoutubeOverlay() {
-  projectorYoutubeVideoId = "";
-  if (!projectorCssObject || !projectorCssIframe) {
+function initializeProjectorYoutubeOverlay(parent) {
+  if (!parent || projectorPrimaryDisplay) {
     return;
   }
 
-  projectorCssObject.visible = false;
-  projectorCssIframe.removeAttribute("src");
+  projectorPrimaryDisplay = createProjectorYoutubeDisplay(
+    parent,
+    projectorScreenMesh,
+    PROJECTOR_SCREEN_WIDTH,
+    PROJECTOR_SCREEN_HEIGHT,
+    "TBPN live projector",
+    new THREE.Vector3(0, 0, 1),
+  );
+  projectorPrimaryDisplay.requiresViewingArea = true;
 }
 
-function showProjectorYoutubeOverlay(videoId = "") {
-  if (!projectorCssObject || !projectorCssIframe) {
+function initializeMirroredProjectorDisplay(parent, mesh, material, fallbackTexture, width, height, title, frontDirectionLocal) {
+  if (!parent || !mesh || !material || !fallbackTexture) {
+    return;
+  }
+
+  const display = createProjectorYoutubeDisplay(parent, mesh, width, height, title, frontDirectionLocal);
+  display.material = material;
+  display.fallbackTexture = fallbackTexture;
+  projectorMirroredDisplays.push(display);
+}
+
+function hideProjectorDisplayOverlay(display) {
+  if (!display?.cssObject || !display.cssIframe) {
+    return;
+  }
+
+  display.youtubeVideoId = "";
+  display.requestedVisible = false;
+  display.cssObject.visible = false;
+  display.cssIframe.removeAttribute("src");
+}
+
+function showProjectorDisplayOverlay(display, videoId = "") {
+  if (!display?.cssObject || !display.cssIframe) {
     return;
   }
 
   const nextVideoId = videoId || "";
   const nextUrl = buildProjectorYoutubeEmbedUrl(nextVideoId);
-  if (projectorYoutubeVideoId !== nextVideoId || projectorCssIframe.src !== nextUrl) {
-    projectorCssIframe.src = nextUrl;
-    projectorYoutubeVideoId = nextVideoId;
+  if (display.youtubeVideoId !== nextVideoId || display.cssIframe.src !== nextUrl) {
+    display.cssIframe.src = nextUrl;
+    display.youtubeVideoId = nextVideoId;
   }
 
-  projectorCssObject.visible = true;
+  display.requestedVisible = true;
+  display.cssObject.visible = isProjectorDisplayVisibleFromCamera(display);
+}
+
+function hideProjectorYoutubeOverlay() {
+  hideProjectorDisplayOverlay(projectorPrimaryDisplay);
+  projectorMirroredDisplays.forEach(hideProjectorDisplayOverlay);
+  updateProjectorAudioZone();
+}
+
+function showProjectorYoutubeOverlay(videoId = "") {
+  showProjectorDisplayOverlay(projectorPrimaryDisplay, videoId);
+  projectorMirroredDisplays.forEach((display) => {
+    showProjectorDisplayOverlay(display, videoId);
+  });
+  updateProjectorDisplayVisibility();
+  updateProjectorAudioZone();
   syncProjectorYoutubeAudioState();
 }
 
-function postProjectorYoutubeCommand(func, args = []) {
-  if (!projectorCssIframe?.contentWindow) {
+function postProjectorYoutubeCommand(display, func, args = []) {
+  if (!display?.cssIframe?.contentWindow) {
     return;
   }
 
-  projectorCssIframe.contentWindow.postMessage(
+  display.cssIframe.contentWindow.postMessage(
     JSON.stringify({
       event: "command",
       func,
@@ -1147,19 +1218,27 @@ function postProjectorYoutubeCommand(func, args = []) {
   );
 }
 
+function syncProjectorDisplayPlayback(display, allowAudio = false) {
+  if (!display?.requestedVisible || !display.cssIframe) {
+    return;
+  }
+
+  if (allowAudio && shouldProjectorDisplayBeAudible(display)) {
+    postProjectorYoutubeCommand(display, "unMute");
+    postProjectorYoutubeCommand(display, "setVolume", [100]);
+    postProjectorYoutubeCommand(display, "playVideo");
+    return;
+  }
+
+  postProjectorYoutubeCommand(display, "mute");
+  postProjectorYoutubeCommand(display, "playVideo");
+}
+
 function syncProjectorYoutubeAudioState() {
-  if (!projectorCssObject?.visible || !projectorCssIframe) {
-    return;
-  }
-
-  if (projectorYoutubeAudioUnlocked) {
-    postProjectorYoutubeCommand("unMute");
-    postProjectorYoutubeCommand("setVolume", [100]);
-    postProjectorYoutubeCommand("playVideo");
-    return;
-  }
-
-  postProjectorYoutubeCommand("mute");
+  syncProjectorDisplayPlayback(projectorPrimaryDisplay, true);
+  projectorMirroredDisplays.forEach((display) => {
+    syncProjectorDisplayPlayback(display, false);
+  });
 }
 
 function unlockProjectorYoutubeAudio() {
@@ -1169,6 +1248,124 @@ function unlockProjectorYoutubeAudio() {
 
   projectorYoutubeAudioUnlocked = true;
   syncProjectorYoutubeAudioState();
+}
+
+function isPositionInsideProjectorViewingArea(worldPosition) {
+  if (!worldPosition) {
+    return false;
+  }
+
+  const planX = worldPosition.x + planCenter.x;
+  const planZ = worldPosition.z + planCenter.z;
+  return (
+    planX >= PROJECTOR_VIEWING_AREA_MIN_PLAN_X &&
+    planX <= PROJECTOR_VIEWING_AREA_MAX_PLAN_X &&
+    planZ >= PROJECTOR_VIEWING_AREA_MIN_PLAN_Z &&
+    planZ <= HANGAR_BAY_BACK_Z
+  );
+}
+
+function getProjectorAudiencePosition() {
+  return state.mode === "walk" ? playerState.position : camera.position;
+}
+
+function shouldProjectorDisplayBeAudible(display) {
+  return Boolean(
+    display?.requestedVisible &&
+      projectorYoutubeAudioUnlocked &&
+      (!display.requiresViewingArea || isPositionInsideProjectorViewingArea(getProjectorAudiencePosition())),
+  );
+}
+
+function isProjectorDisplayVisibleFromCamera(display) {
+  if (!display?.mesh || !display.requestedVisible) {
+    return false;
+  }
+
+  if (display.requiresViewingArea && !isPositionInsideProjectorViewingArea(getProjectorAudiencePosition())) {
+    return false;
+  }
+
+  projectorDisplayCameraPosition.copy(camera.position);
+  display.mesh.getWorldQuaternion(projectorDisplayQuaternion);
+  projectorDisplayNormal
+    .copy(display.frontDirectionLocal)
+    .applyQuaternion(projectorDisplayQuaternion)
+    .normalize();
+  projectorDisplayTargetPoint.set(0, 0, 0);
+  display.mesh.localToWorld(projectorDisplayTargetPoint);
+  projectorDisplayRayDirection
+    .copy(projectorDisplayCameraPosition)
+    .sub(projectorDisplayTargetPoint)
+    .normalize();
+  if (projectorDisplayNormal.dot(projectorDisplayRayDirection) <= 0.02) {
+    return false;
+  }
+
+  if (display.requiresViewingArea) {
+    return true;
+  }
+
+  const sampleHalfWidth = display.width * 0.32;
+  const sampleHalfHeight = display.height * 0.32;
+  const samplePoints = [
+    [0, 0],
+    [-sampleHalfWidth, sampleHalfHeight],
+    [sampleHalfWidth, sampleHalfHeight],
+    [-sampleHalfWidth, -sampleHalfHeight],
+    [sampleHalfWidth, -sampleHalfHeight],
+  ];
+
+  for (const [sampleX, sampleY] of samplePoints) {
+    projectorDisplayTargetPoint
+      .copy(display.frontDirectionLocal)
+      .multiplyScalar(display.surfaceOffset)
+      .add(new THREE.Vector3(sampleX, sampleY, 0));
+    display.mesh.localToWorld(projectorDisplayTargetPoint);
+    projectorDisplayRayDirection.copy(projectorDisplayTargetPoint).sub(projectorDisplayCameraPosition);
+    const targetDistance = projectorDisplayRayDirection.length();
+    if (targetDistance <= 0.001) {
+      return true;
+    }
+
+    projectorDisplayRayDirection.normalize();
+    projectorVisibilityRaycaster.set(projectorDisplayCameraPosition, projectorDisplayRayDirection);
+    projectorVisibilityRaycaster.far = targetDistance;
+    const hit = projectorVisibilityRaycaster
+      .intersectObjects([architectureGroup, furnishingGroup], true)
+      .find((intersection) => intersection.distance >= 0.001);
+
+    if (!hit) {
+      return true;
+    }
+
+    if (hit.object === display.mesh && hit.distance <= targetDistance + 0.05) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function updateProjectorDisplayVisibility() {
+  const displays = [projectorPrimaryDisplay, ...projectorMirroredDisplays];
+  displays.forEach((display) => {
+    if (!display?.cssObject) {
+      return;
+    }
+    // Live status is shared, but whether a screen is visible is always decided locally.
+    display.cssObject.visible = isProjectorDisplayVisibleFromCamera(display);
+  });
+}
+
+function updateProjectorAudioZone() {
+  const shouldBeAudible = shouldProjectorDisplayBeAudible(projectorPrimaryDisplay);
+  if (shouldBeAudible === projectorAudioAudible) {
+    return;
+  }
+
+  projectorAudioAudible = shouldBeAudible;
+  syncProjectorDisplayPlayback(projectorPrimaryDisplay, true);
 }
 
 function getProjectorVideoElement() {
@@ -1231,6 +1428,15 @@ function applyProjectorFallbackTexture() {
   projectorScreenMaterial.emissiveMap = null;
   projectorScreenMaterial.emissiveIntensity = 0.16;
   projectorScreenMaterial.needsUpdate = true;
+  projectorMirroredDisplays.forEach((display) => {
+    if (!display.material || !display.fallbackTexture) {
+      return;
+    }
+    display.material.map = display.fallbackTexture;
+    display.material.emissiveMap = null;
+    display.material.emissiveIntensity = 0.16;
+    display.material.needsUpdate = true;
+  });
 }
 
 function projectorStreamLooksLikeHls(playbackUrl, mimeType = "") {
@@ -1349,6 +1555,15 @@ async function applyProjectorPlayback(playbackUrl, mimeType = "") {
   projectorScreenMaterial.emissiveMap = videoTexture;
   projectorScreenMaterial.emissiveIntensity = 0.28;
   projectorScreenMaterial.needsUpdate = true;
+  projectorMirroredDisplays.forEach((display) => {
+    if (!display.material) {
+      return;
+    }
+    display.material.map = videoTexture;
+    display.material.emissiveMap = videoTexture;
+    display.material.emissiveIntensity = 0.28;
+    display.material.needsUpdate = true;
+  });
 }
 
 async function refreshProjectorStatus() {
@@ -1380,16 +1595,12 @@ async function refreshProjectorStatus() {
       }
 
       showProjectorYoutubeOverlay(nextStatus.videoId);
-
-      if (!nextStatus.playbackUrl) {
-        applyProjectorFallbackTexture();
-        return;
-      }
-
-      await applyProjectorPlayback(nextStatus.playbackUrl, nextStatus.mimeType);
+      applyProjectorFallbackTexture();
     })
     .catch((error) => {
       console.error("Unable to refresh projector status", error);
+      showProjectorYoutubeOverlay();
+      applyProjectorFallbackTexture();
     })
     .finally(() => {
       projectorStatusRequest = null;
@@ -10948,6 +11159,16 @@ function addP1P10CornerArchitecture() {
   );
   screen.position.set(0, 0, -0.2);
   tvMount.add(screen);
+  initializeMirroredProjectorDisplay(
+    tvMount,
+    screen,
+    screen.material,
+    screen.material.map,
+    FRONT_ROOM_TV_SCREEN_WIDTH,
+    FRONT_ROOM_TV_SCREEN_HEIGHT,
+    "TBPN live front room TV",
+    new THREE.Vector3(0, 0, -1),
+  );
   enableShadows(tvMount);
   placePlanObject(tvMount, [4.48, 8.48], 2.1, 0, architectureGroup);
 
@@ -17527,6 +17748,8 @@ function animate() {
     fallback.visible = useFallback;
   });
   renderer.render(scene, camera);
+  updateProjectorDisplayVisibility();
+  updateProjectorAudioZone();
   projectorCssRenderer.render(scene, camera);
 }
 
