@@ -14,7 +14,7 @@
       }
     </script>
     <link rel="icon" href="./favicon.png" />
-    <link rel="stylesheet" href="./styles.css?v=multiplayer-34" />
+    <link rel="stylesheet" href="./styles.css?v=multiplayer-35" />
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
   </head>
   <body>
@@ -163,9 +163,39 @@
       </div>
     </div>
 
-    <button id="suggestFeatureButton" class="suggest-feature-button" type="button" hidden>
-      Suggest Feature
-    </button>
+    <section id="chatPanel" class="chat-panel" aria-hidden="true" hidden>
+      <form id="chatForm" class="chat-panel__card" autocomplete="off">
+        <div class="chat-panel__eyebrow">Live Chat</div>
+        <div class="chat-panel__title-row">
+          <div>
+            <strong class="chat-panel__title">TBPN Room Chat</strong>
+            <div id="chatPanelMeta" class="chat-panel__meta">Loading room…</div>
+          </div>
+        </div>
+
+        <div id="chatMessages" class="chat-panel__messages" aria-live="polite">
+          <div id="chatEmpty" class="chat-panel__empty">
+            No messages yet. Be the first post on the truss screens.
+          </div>
+        </div>
+
+        <label class="chat-panel__field" for="chatMessageInput">
+          <span class="chat-panel__field-label">Message</span>
+          <textarea
+            id="chatMessageInput"
+            class="chat-panel__textarea"
+            name="message"
+            maxlength="280"
+            placeholder="Click 'T' to type"
+            required
+          ></textarea>
+        </label>
+
+        <div class="chat-panel__footer">
+          <p id="chatStatus" class="chat-panel__status" aria-live="polite"></p>
+        </div>
+      </form>
+    </section>
 
     <div id="suggestFeaturePanel" class="suggest-feature-panel" aria-hidden="true" hidden>
       <form id="suggestFeatureForm" class="suggest-feature-panel__card" autocomplete="off">
@@ -995,6 +1025,6 @@
       </div>
     </div>
 
-    <script type="module" src="./main.js?v=multiplayer-34"></script>
+    <script type="module" src="./main.js?v=multiplayer-35"></script>
   </body>
 </html>

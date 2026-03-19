@@ -230,6 +230,7 @@ const MULTIPLAYER_TRACK_INTERVAL_MS = 120;
 const MULTIPLAYER_IDLE_REFRESH_MS = 2500;
 const MULTIPLAYER_CHANNEL_PREFIX = "tbpn-sim:world";
 const MULTIPLAYER_BROADCAST_EVENT = "pose";
+const MULTIPLAYER_CHAT_EVENT = "chat-message";
 const MULTIPLAYER_WORLD_EVENT = "world-event";
 const MULTIPLAYER_WORLD_SYNC_REQUEST_EVENT = "world-sync-request";
 const MULTIPLAYER_WORLD_SYNC_STATE_EVENT = "world-sync-state";
@@ -570,6 +571,17 @@ const walkKeyS = document.querySelector("#walkKeyS");
 const walkKeyD = document.querySelector("#walkKeyD");
 const walkKeyShift = document.querySelector("#walkKeyShift");
 const walkKeyJump = document.querySelector("#walkKeyJump");
+const chatToggleButton = document.querySelector("#chatToggleButton");
+const chatPanel = document.querySelector("#chatPanel");
+const chatForm = document.querySelector("#chatForm");
+const chatPanelMeta = document.querySelector("#chatPanelMeta");
+const chatCloseButton = document.querySelector("#chatCloseButton");
+const chatMessagesRoot = document.querySelector("#chatMessages");
+const chatEmpty = document.querySelector("#chatEmpty");
+const chatMessageInput = document.querySelector("#chatMessageInput");
+const chatStatus = document.querySelector("#chatStatus");
+const chatSubmitButton = document.querySelector("#chatSubmitButton");
+const chatCancelButton = document.querySelector("#chatCancelButton");
 const suggestFeatureButton = document.querySelector("#suggestFeatureButton");
 const suggestFeaturePanel = document.querySelector("#suggestFeaturePanel");
 const suggestFeatureForm = document.querySelector("#suggestFeatureForm");
@@ -617,6 +629,12 @@ const SUBSCRIBERS_STEP = 50;
 const SUBSCRIBERS_GAIN_THRESHOLD = 0.62;
 const SUBSCRIBER_EMAIL_LIMIT = 120;
 const SUBSCRIBER_NAME_LIMIT = 24;
+const CHAT_MESSAGE_LIMIT = 280;
+const CHAT_HISTORY_LIMIT = 120;
+const CHAT_HISTORY_POLL_MS = 12000;
+const CHAT_STAGE_CANVAS_WIDTH = 1080;
+const CHAT_STAGE_CANVAS_HEIGHT = 1920;
+const CHAT_STAGE_MESSAGE_LIMIT = 12;
 const SUGGESTION_MESSAGE_LIMIT = 500;
 const LEADERBOARD_LIMIT = 20;
 let subscriberCount = SUBSCRIBERS_START;
@@ -628,8 +646,17 @@ let activeSubscriberName = "";
 let leaderboardEntries = [];
 let authMode = "login";
 let isAuthBusy = false;
+let isChatBusy = false;
 let isSuggestionBusy = false;
 let isSuggestionPanelOpen = false;
+let chatMessages = [];
+let chatLatestMessageId = 0;
+let chatHistoryLoaded = false;
+let chatHistoryRequest = null;
+let chatHistoryPollTimer = null;
+let chatStageCanvas = null;
+let chatStageContext = null;
+let chatStageTexture = null;
 let multiplayerConnectionState = "offline";
 let multiplayerOnlineCount = 0;
 let multiplayerPresenceKey = "";
@@ -662,6 +689,10 @@ const multiplayerRoomId = getMultiplayerRoomId();
 const multiplayerClientId =
   globalThis.crypto?.randomUUID?.() ?? `client-${Math.random().toString(36).slice(2, 10)}`;
 const remotePlayers = new Map();
+const chatMessageTimeFormatter = new Intl.DateTimeFormat(undefined, {
+  hour: "numeric",
+  minute: "2-digit",
+});
 const PRODUCER_MAN_CAMERA_SHOTS = {
   host: {
     positionPlan: [9.4, 25.0],
@@ -1739,6 +1770,323 @@ function getSubscriberDisplayNameFromEmail(email) {
   return sanitizeSubscriberName(titled || localPart);
 }
 
+function sanitizeChatMessage(message) {
+  return String(message ?? "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\u0000/g, "")
+    .trim()
+    .slice(0, CHAT_MESSAGE_LIMIT);
+}
+
+function formatChatMessageTime(createdAt) {
+  const timestamp = new Date(createdAt);
+  if (!Number.isFinite(timestamp.getTime())) {
+    return "";
+  }
+  return chatMessageTimeFormatter.format(timestamp);
+}
+
+function normalizeChatMessage(message) {
+  const id = Number(message?.id);
+  if (!Number.isFinite(id) || id <= 0) {
+    return null;
+  }
+
+  const roomId = typeof message?.room_id === "string" ? message.room_id : typeof message?.roomId === "string" ? message.roomId : "";
+  const normalizedRoomId = roomId
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32);
+  const text = sanitizeChatMessage(message?.message ?? "");
+  if (!normalizedRoomId || !text) {
+    return null;
+  }
+
+  return {
+    id,
+    roomId: normalizedRoomId,
+    profileId: typeof message?.profile_id === "string" ? message.profile_id : typeof message?.profileId === "string" ? message.profileId : "",
+    displayName: sanitizeSubscriberName(message?.display_name ?? message?.displayName ?? "") || "Player",
+    message: text,
+    createdAt: typeof message?.created_at === "string" ? message.created_at : typeof message?.createdAt === "string" ? message.createdAt : new Date().toISOString(),
+  };
+}
+
+function ensureChatStageTexture() {
+  if (chatStageTexture) {
+    return chatStageTexture;
+  }
+
+  chatStageCanvas = document.createElement("canvas");
+  chatStageCanvas.width = CHAT_STAGE_CANVAS_WIDTH;
+  chatStageCanvas.height = CHAT_STAGE_CANVAS_HEIGHT;
+  chatStageContext = chatStageCanvas.getContext("2d");
+  chatStageTexture = new THREE.CanvasTexture(chatStageCanvas);
+  chatStageTexture.colorSpace = THREE.SRGBColorSpace;
+  chatStageTexture.minFilter = THREE.LinearFilter;
+  chatStageTexture.magFilter = THREE.LinearFilter;
+  chatStageTexture.generateMipmaps = false;
+  renderChatStageTexture();
+  return chatStageTexture;
+}
+
+function renderChatStageTexture() {
+  if (!chatStageTexture || !chatStageCanvas || !chatStageContext) {
+    return;
+  }
+
+  const context = chatStageContext;
+  const canvasWidth = chatStageCanvas.width;
+  const canvasHeight = chatStageCanvas.height;
+  context.clearRect(0, 0, canvasWidth, canvasHeight);
+
+  const backgroundGradient = context.createLinearGradient(0, 0, canvasWidth, canvasHeight);
+  backgroundGradient.addColorStop(0, "#09151c");
+  backgroundGradient.addColorStop(0.52, "#0d1f27");
+  backgroundGradient.addColorStop(1, "#04090d");
+  context.fillStyle = backgroundGradient;
+  context.fillRect(0, 0, canvasWidth, canvasHeight);
+
+  const glowGradient = context.createRadialGradient(canvasWidth * 0.2, canvasHeight * 0.08, 40, canvasWidth * 0.2, canvasHeight * 0.08, canvasWidth * 0.72);
+  glowGradient.addColorStop(0, "rgba(92, 255, 186, 0.24)");
+  glowGradient.addColorStop(1, "rgba(92, 255, 186, 0)");
+  context.fillStyle = glowGradient;
+  context.fillRect(0, 0, canvasWidth, canvasHeight);
+
+  context.fillStyle = "rgba(255, 255, 255, 0.06)";
+  context.fillRect(84, 84, canvasWidth - 168, 4);
+
+  context.fillStyle = "#74ffd7";
+  context.font = '700 72px "Arial Rounded MT Bold", "Trebuchet MS", sans-serif';
+  context.textAlign = "left";
+  context.textBaseline = "top";
+  context.fillText("TBPN LIVE CHAT", 92, 116);
+
+  context.fillStyle = "rgba(228, 245, 255, 0.82)";
+  context.font = '600 34px "Trebuchet MS", "Arial Rounded MT Bold", sans-serif';
+  context.fillText(`ROOM ${multiplayerRoomId.toUpperCase()}`, 92, 210);
+  context.textAlign = "right";
+  context.fillText(`${Math.max(0, multiplayerOnlineCount)} LIVE`, canvasWidth - 92, 210);
+
+  context.textAlign = "left";
+  context.fillStyle = "rgba(222, 238, 245, 0.7)";
+  context.font = '500 28px "Trebuchet MS", sans-serif';
+  context.fillText("Projected from saved room messages", 92, 262);
+
+  const latestMessages = chatMessages.slice(-CHAT_STAGE_MESSAGE_LIMIT);
+  if (latestMessages.length === 0) {
+    roundRect(context, 92, 356, canvasWidth - 184, 420, 34);
+    context.fillStyle = "rgba(255, 255, 255, 0.05)";
+    context.fill();
+    context.strokeStyle = "rgba(126, 242, 191, 0.26)";
+    context.lineWidth = 3;
+    context.stroke();
+
+    context.fillStyle = "#f4fbff";
+    context.font = '700 54px "Arial Rounded MT Bold", "Trebuchet MS", sans-serif';
+    context.fillText("No messages yet", 136, 432);
+    context.fillStyle = "rgba(221, 235, 243, 0.8)";
+    context.font = '500 36px "Trebuchet MS", sans-serif';
+    const emptyLines = [
+      "Open chat to post the first message.",
+      "New posts are saved in Supabase and mirrored",
+      "to these suspended stage screens.",
+    ];
+    emptyLines.forEach((line, index) => {
+      context.fillText(line, 136, 530 + index * 56);
+    });
+    chatStageTexture.needsUpdate = true;
+    return;
+  }
+
+  const cardX = 92;
+  const cardWidth = canvasWidth - 184;
+  const cardGap = 20;
+  const layoutTop = 236;
+  const layoutBottom = canvasHeight - 92;
+  const cards = [];
+  let usedHeight = 0;
+
+  for (let index = latestMessages.length - 1; index >= 0; index -= 1) {
+    const entry = latestMessages[index];
+    context.font = '600 32px "Trebuchet MS", "Arial Rounded MT Bold", sans-serif';
+    const bodyLines = wrapCanvasText(context, entry.message, cardWidth - 88).slice(0, 3);
+    const bodyHeight = bodyLines.length * 40;
+    const cardHeight = 104 + bodyHeight;
+    const nextUsedHeight = usedHeight === 0 ? cardHeight : usedHeight + cardGap + cardHeight;
+    if (layoutBottom - nextUsedHeight < layoutTop) {
+      break;
+    }
+
+    cards.push({
+      entry,
+      index,
+      bodyLines,
+      cardHeight,
+    });
+    usedHeight = nextUsedHeight;
+  }
+
+  let y = layoutBottom - usedHeight;
+  cards.reverse().forEach(({ entry, index, bodyLines, cardHeight }) => {
+    const accent = index === latestMessages.length - 1 ? "rgba(126, 242, 191, 0.24)" : "rgba(255, 255, 255, 0.08)";
+
+    roundRect(context, cardX, y, cardWidth, cardHeight, 30);
+    context.fillStyle = "rgba(7, 14, 20, 0.82)";
+    context.fill();
+    context.strokeStyle = accent;
+    context.lineWidth = 3;
+    context.stroke();
+
+    context.fillStyle = "#eafff7";
+    context.font = '700 34px "Arial Rounded MT Bold", "Trebuchet MS", sans-serif';
+    context.fillText(entry.displayName, cardX + 42, y + 30, cardWidth - 180);
+
+    context.textAlign = "right";
+    context.fillStyle = "rgba(210, 228, 239, 0.7)";
+    context.font = '500 24px "Trebuchet MS", sans-serif';
+    context.fillText(formatChatMessageTime(entry.createdAt), cardX + cardWidth - 42, y + 36);
+
+    context.textAlign = "left";
+    context.fillStyle = "#f4fbff";
+    context.font = '500 32px "Trebuchet MS", sans-serif';
+    bodyLines.forEach((line, lineIndex) => {
+      context.fillText(line, cardX + 42, y + 78 + lineIndex * 40);
+    });
+
+    y += cardHeight + cardGap;
+  });
+
+  chatStageTexture.needsUpdate = true;
+}
+
+function syncChatPanelMeta() {
+  if (!chatPanelMeta) {
+    return;
+  }
+  chatPanelMeta.textContent = `${multiplayerRoomId} room`;
+}
+
+function isChatPinnedToBottom() {
+  if (!chatMessagesRoot) {
+    return false;
+  }
+  return chatMessagesRoot.scrollHeight - chatMessagesRoot.scrollTop - chatMessagesRoot.clientHeight < 28;
+}
+
+function scrollChatToBottom() {
+  if (!chatMessagesRoot) {
+    return;
+  }
+  chatMessagesRoot.scrollTop = chatMessagesRoot.scrollHeight;
+}
+
+function renderChatMessages({ stickToBottom = false } = {}) {
+  if (!chatMessagesRoot) {
+    renderChatStageTexture();
+    syncChatPanelMeta();
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  chatMessages.forEach((entry) => {
+    const item = document.createElement("article");
+    item.className = "chat-panel__message";
+
+    const header = document.createElement("div");
+    header.className = "chat-panel__message-header";
+
+    const author = document.createElement("strong");
+    author.className = "chat-panel__message-author";
+    author.textContent = entry.displayName;
+
+    const time = document.createElement("span");
+    time.className = "chat-panel__message-time";
+    time.textContent = formatChatMessageTime(entry.createdAt);
+
+    header.append(author, time);
+
+    const body = document.createElement("p");
+    body.className = "chat-panel__message-body";
+    body.textContent = entry.message;
+
+    item.append(header, body);
+    fragment.append(item);
+  });
+
+  chatMessagesRoot.replaceChildren(fragment);
+  if (chatEmpty) {
+    chatEmpty.hidden = chatMessages.length > 0;
+    if (!chatMessages.length) {
+      chatMessagesRoot.append(chatEmpty);
+    }
+  }
+  syncChatPanelMeta();
+  renderChatStageTexture();
+  if (stickToBottom) {
+    requestAnimationFrame(() => {
+      scrollChatToBottom();
+    });
+  }
+}
+
+function resetChatHistory() {
+  chatMessages = [];
+  chatLatestMessageId = 0;
+  chatHistoryLoaded = false;
+  chatHistoryRequest = null;
+  if (chatMessageInput) {
+    chatMessageInput.value = "";
+  }
+  setChatStatus("");
+  setChatBusy(false);
+  renderChatMessages();
+}
+
+function ingestChatMessages(messages, { stickToBottom = false } = {}) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    syncChatPanelMeta();
+    renderChatStageTexture();
+    return false;
+  }
+
+  const shouldStick = stickToBottom || isChatPinnedToBottom();
+  const nextMessages = new Map(chatMessages.map((entry) => [entry.id, entry]));
+  let changed = false;
+
+  messages.forEach((message) => {
+    const normalized = normalizeChatMessage(message);
+    if (!normalized || normalized.roomId !== multiplayerRoomId) {
+      return;
+    }
+
+    const existing = nextMessages.get(normalized.id);
+    if (
+      existing &&
+      existing.message === normalized.message &&
+      existing.displayName === normalized.displayName &&
+      existing.createdAt === normalized.createdAt
+    ) {
+      return;
+    }
+
+    nextMessages.set(normalized.id, normalized);
+    changed = true;
+  });
+
+  if (!changed) {
+    return false;
+  }
+
+  chatMessages = Array.from(nextMessages.values())
+    .sort((left, right) => left.id - right.id)
+    .slice(-CHAT_HISTORY_LIMIT);
+  chatLatestMessageId = chatMessages[chatMessages.length - 1]?.id ?? 0;
+  renderChatMessages({ stickToBottom: shouldStick });
+  return true;
+}
+
 function normalizeSubscriberProfile(profile) {
   return {
     id: profile?.id ?? "",
@@ -2481,6 +2829,7 @@ function syncMultiplayerHud() {
         ? "Joining room"
         : "Disconnected";
   }
+  renderChatStageTexture();
 }
 
 function disconnectMultiplayerSession() {
@@ -2546,6 +2895,12 @@ function ensureMultiplayerSession() {
       return;
     }
     handleMultiplayerBroadcast(payload);
+  });
+  channel.on("broadcast", { event: MULTIPLAYER_CHAT_EVENT }, ({ payload }) => {
+    if (channel !== multiplayerChannel) {
+      return;
+    }
+    handleMultiplayerChatBroadcast(payload);
   });
   channel.on("broadcast", { event: MULTIPLAYER_WORLD_EVENT }, ({ payload }) => {
     if (channel !== multiplayerChannel) {
@@ -2682,6 +3037,8 @@ function clearActiveSubscriberProfile() {
   subscriberCount = SUBSCRIBERS_START;
   lastSubscriberDelta = 0;
   hasSubscriberOutcome = false;
+  stopChatHistoryPolling();
+  resetChatHistory();
 }
 
 function setSessionGateMessage(message = "") {
@@ -2768,6 +3125,229 @@ function isSubscriberSessionReady() {
   return Boolean(activeSubscriberProfileKey);
 }
 
+function isChatInputFocused() {
+  return document.activeElement === chatMessageInput;
+}
+
+function setChatStatus(message = "", tone = "neutral") {
+  if (!chatStatus) {
+    return;
+  }
+  chatStatus.textContent = message;
+  chatStatus.dataset.tone = tone;
+}
+
+function setChatBusy(isBusyNow) {
+  isChatBusy = isBusyNow;
+  if (chatMessageInput) {
+    chatMessageInput.disabled = isBusyNow;
+  }
+  if (chatSubmitButton) {
+    chatSubmitButton.disabled = isBusyNow;
+    chatSubmitButton.textContent = isBusyNow ? "Sending..." : "Send";
+  }
+  if (chatCancelButton) {
+    chatCancelButton.disabled = isBusyNow;
+  }
+  if (chatCloseButton) {
+    chatCloseButton.disabled = isBusyNow;
+  }
+  if (chatToggleButton) {
+    chatToggleButton.disabled = isBusyNow;
+  }
+}
+
+function closeChatPanel() {
+  setChatBusy(false);
+  setChatStatus("");
+  syncUi();
+}
+
+function openChatPanel() {
+  void loadInitialChatHistory();
+  requestAnimationFrame(() => {
+    scrollChatToBottom();
+    chatMessageInput?.focus();
+  });
+}
+
+async function loadInitialChatHistory() {
+  if (!isSubscriberSessionReady() || chatHistoryLoaded) {
+    return;
+  }
+
+  if (chatHistoryRequest) {
+    await chatHistoryRequest;
+    return;
+  }
+
+  chatHistoryRequest = (async () => {
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .select("id, room_id, profile_id, display_name, message, created_at")
+      .eq("room_id", multiplayerRoomId)
+      .order("id", { ascending: false })
+      .limit(CHAT_HISTORY_LIMIT);
+
+    if (error) {
+      throw error;
+    }
+
+    const normalized = (data ?? [])
+      .map((entry) => normalizeChatMessage(entry))
+      .filter(Boolean)
+      .reverse();
+    chatHistoryLoaded = true;
+    ingestChatMessages(normalized);
+  })();
+
+  try {
+    await chatHistoryRequest;
+  } catch (error) {
+    const errorMessage = String(error?.message ?? "");
+    if (/relation .*chat_messages/i.test(errorMessage)) {
+      stopChatHistoryPolling();
+      setChatStatus("Run the latest Supabase schema to enable chat.", "error");
+    } else {
+      setChatStatus(error?.message || "Unable to load chat history right now.", "error");
+    }
+  } finally {
+    chatHistoryRequest = null;
+  }
+}
+
+async function pollChatHistory() {
+  if (!isSubscriberSessionReady() || chatHistoryRequest) {
+    return;
+  }
+
+  chatHistoryRequest = (async () => {
+    let query = supabase
+      .from("chat_messages")
+      .select("id, room_id, profile_id, display_name, message, created_at")
+      .eq("room_id", multiplayerRoomId)
+      .order("id", { ascending: true })
+      .limit(CHAT_HISTORY_LIMIT);
+
+    if (chatLatestMessageId > 0) {
+      query = query.gt("id", chatLatestMessageId);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      throw error;
+    }
+
+    ingestChatMessages(data ?? []);
+  })();
+
+  try {
+    await chatHistoryRequest;
+  } catch (error) {
+    console.error("Unable to refresh chat history", error);
+    if (/relation .*chat_messages/i.test(String(error?.message ?? ""))) {
+      stopChatHistoryPolling();
+    }
+  } finally {
+    chatHistoryRequest = null;
+  }
+}
+
+function startChatHistoryPolling() {
+  stopChatHistoryPolling();
+  void loadInitialChatHistory();
+  chatHistoryPollTimer = window.setInterval(() => {
+    void pollChatHistory();
+  }, CHAT_HISTORY_POLL_MS);
+}
+
+function stopChatHistoryPolling() {
+  if (chatHistoryPollTimer) {
+    clearInterval(chatHistoryPollTimer);
+    chatHistoryPollTimer = null;
+  }
+}
+
+function handleMultiplayerChatBroadcast(payload) {
+  const message = normalizeChatMessage(payload?.message ?? payload);
+  if (!message || message.roomId !== multiplayerRoomId) {
+    return;
+  }
+  ingestChatMessages([message]);
+}
+
+async function handleChatSubmit(event) {
+  event.preventDefault();
+  if (isChatBusy) {
+    return;
+  }
+
+  if (!isSubscriberSessionReady()) {
+    closeChatPanel();
+    openSessionGate();
+    setSessionGateMessage("Log in to join the room chat.");
+    return;
+  }
+
+  const message = sanitizeChatMessage(chatMessageInput?.value ?? "");
+  if (!message) {
+    setChatStatus("Write a quick message first.", "error");
+    chatMessageInput?.focus();
+    return;
+  }
+
+  setChatBusy(true);
+  setChatStatus("");
+
+  try {
+    const { data, error } = await supabase
+      .from("chat_messages")
+      .insert({
+        room_id: multiplayerRoomId,
+        profile_id: activeSubscriberProfileKey,
+        display_name: activeSubscriberName,
+        message,
+      })
+      .select("id, room_id, profile_id, display_name, message, created_at")
+      .single();
+
+    if (error) {
+      throw error;
+    }
+
+    const normalized = normalizeChatMessage(data);
+    if (normalized) {
+      ingestChatMessages([normalized], { stickToBottom: true });
+      broadcastMultiplayerEvent(MULTIPLAYER_CHAT_EVENT, {
+        message: {
+          id: normalized.id,
+          room_id: normalized.roomId,
+          profile_id: normalized.profileId,
+          display_name: normalized.displayName,
+          message: normalized.message,
+          created_at: normalized.createdAt,
+        },
+      });
+    }
+
+    if (chatMessageInput) {
+      chatMessageInput.value = "";
+      chatMessageInput.focus();
+    }
+    setChatStatus("Message sent live.", "success");
+  } catch (error) {
+    console.error("Unable to send chat message", error);
+    const errorMessage = String(error?.message ?? "");
+    if (/relation .*chat_messages/i.test(errorMessage)) {
+      setChatStatus("Run the latest Supabase schema to enable chat.", "error");
+    } else {
+      setChatStatus(error?.message || "Unable to send your message right now.", "error");
+    }
+  } finally {
+    setChatBusy(false);
+  }
+}
+
 function sanitizeSuggestionMessage(value) {
   return String(value ?? "")
     .replace(/\r\n/g, "\n")
@@ -2828,6 +3408,7 @@ function openSuggestFeaturePanel() {
     return;
   }
 
+  closeChatPanel();
   unlockPointer();
   clearMovementState();
   isSuggestionPanelOpen = true;
@@ -2909,6 +3490,7 @@ function openSessionGate() {
     return;
   }
 
+  closeChatPanel();
   closeSuggestFeaturePanel();
   unlockPointer();
   clearMovementState();
@@ -3109,6 +3691,7 @@ async function loadSubscriberProfileFromSession(session, preferredDisplayName = 
   closeSessionGate();
   await refreshSubscriberViews();
   ensureMultiplayerSession();
+  startChatHistoryPolling();
 }
 
 async function persistSubscriberProgress() {
@@ -3404,6 +3987,7 @@ window.addEventListener("keydown", onKeyDown);
 window.addEventListener("keyup", onKeyUp);
 window.addEventListener("blur", clearMovementState);
 window.addEventListener("beforeunload", disconnectMultiplayerSession);
+window.addEventListener("beforeunload", stopChatHistoryPolling);
 window.addEventListener("beforeunload", stopProjectorStatusPolling);
 if (sessionGateForm) {
   sessionGateForm.addEventListener("submit", (event) => {
@@ -3438,6 +4022,28 @@ if (sessionGatePasswordInput) {
 if (authSignOutButton) {
   authSignOutButton.addEventListener("click", () => {
     void handleSignOut();
+  });
+}
+if (chatForm) {
+  chatForm.addEventListener("submit", (event) => {
+    void handleChatSubmit(event);
+  });
+}
+if (chatMessageInput) {
+  chatMessageInput.addEventListener("focus", () => {
+    unlockPointer();
+    clearMovementState();
+  });
+  chatMessageInput.addEventListener("input", () => {
+    if (chatStatus?.dataset.tone === "error") {
+      setChatStatus("");
+    }
+  });
+  chatMessageInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      chatForm?.requestSubmit();
+    }
   });
 }
 if (suggestFeatureButton) {
@@ -9861,10 +10467,8 @@ function addP3aStorageShelf() {
 
   function addTallVerticalMonitor(center, rotation = 0, { suspended = false } = {}) {
     const display = new THREE.Group();
-    const monitorTexture = new THREE.TextureLoader().load(
-      new URL("./streamchat.png", import.meta.url).href,
-    );
-    monitorTexture.colorSpace = THREE.SRGBColorSpace;
+    const monitorTexture = ensureChatStageTexture();
+    renderChatStageTexture();
     const standMaterial = new THREE.MeshStandardMaterial({
       color: "#1a1d21",
       roughness: 0.66,
@@ -18310,6 +18914,11 @@ function syncUi() {
   if (leaderboardPanel) {
     leaderboardPanel.hidden = !gameplayHudVisible;
   }
+  if (chatPanel) {
+    const visible = gameplayHudVisible;
+    chatPanel.hidden = !visible;
+    chatPanel.setAttribute("aria-hidden", visible ? "false" : "true");
+  }
   if (suggestFeatureButton) {
     suggestFeatureButton.hidden = !gameplayHudVisible;
   }
@@ -18429,7 +19038,17 @@ function onKeyDown(event) {
     return;
   }
 
+  if (isChatInputFocused()) {
+    return;
+  }
+
   switch (event.code) {
+    case "KeyT":
+      if (!event.repeat) {
+        event.preventDefault();
+        openChatPanel();
+      }
+      break;
     case "KeyM":
       if (!event.repeat) {
         if (bgMusic) {
@@ -18519,6 +19138,10 @@ function onKeyUp(event) {
   }
 
   if (state.mode === "minigame") {
+    return;
+  }
+
+  if (isChatInputFocused()) {
     return;
   }
 
@@ -18727,4 +19350,30 @@ function roundRect(context, x, y, width, height, radius) {
   context.lineTo(x, y + radius);
   context.quadraticCurveTo(x, y, x + radius, y);
   context.closePath();
+}
+
+function wrapCanvasText(context, text, maxWidth) {
+  const words = String(text ?? "").split(/\s+/).filter(Boolean);
+  if (!context || words.length === 0) {
+    return [String(text ?? "").trim()].filter(Boolean);
+  }
+
+  const lines = [];
+  let currentLine = "";
+
+  words.forEach((word) => {
+    const candidate = currentLine ? `${currentLine} ${word}` : word;
+    if (context.measureText(candidate).width <= maxWidth || !currentLine) {
+      currentLine = candidate;
+      return;
+    }
+    lines.push(currentLine);
+    currentLine = word;
+  });
+
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+
+  return lines;
 }
