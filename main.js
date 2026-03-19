@@ -704,6 +704,7 @@ let projectorPrimaryDisplay = null;
 const projectorMirroredDisplays = [];
 let projectorYoutubeAudioUnlocked = false;
 let projectorAudioAudible = false;
+let projectorAudioSuppressedByMinigame = false;
 let projectorLastKnownVideoId = "";
 const multiplayerRoomId = getMultiplayerRoomId();
 const multiplayerClientId =
@@ -1568,6 +1569,7 @@ function getProjectorAudiencePosition() {
 function shouldProjectorDisplayBeAudible(display) {
   return Boolean(
     display?.requestedVisible &&
+      !projectorAudioSuppressedByMinigame &&
       projectorYoutubeAudioUnlocked &&
       (!display.requiresViewingArea || isPositionInsideProjectorViewingArea(getProjectorAudiencePosition())),
   );
@@ -17322,6 +17324,8 @@ function startJohnSponsorRead(npc) {
   standUpFromSeat();
   playerState.motion = 0;
   state.mode = "minigame";
+  projectorAudioSuppressedByMinigame = true;
+  updateProjectorAudioZone();
   unlockPointer();
   hideInteractionPrompt();
   const line =
@@ -17332,7 +17336,9 @@ function startJohnSponsorRead(npc) {
 }
 
 function handleJohnSponsorReadExit() {
+  projectorAudioSuppressedByMinigame = false;
   state.mode = "walk";
+  updateProjectorAudioZone();
   syncUi();
 }
 
@@ -17363,6 +17369,8 @@ function startJordiHero(npc) {
   standUpFromSeat();
   playerState.motion = 0;
   state.mode = "minigame";
+  projectorAudioSuppressedByMinigame = true;
+  updateProjectorAudioZone();
   unlockPointer();
   hideInteractionPrompt();
   const line =
@@ -17373,7 +17381,9 @@ function startJordiHero(npc) {
 }
 
 function handleJordiHeroExit() {
+  projectorAudioSuppressedByMinigame = false;
   state.mode = "walk";
+  updateProjectorAudioZone();
   syncUi();
 }
 
