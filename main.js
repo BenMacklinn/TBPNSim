@@ -15069,7 +15069,7 @@ function addHangarRearShelf(center, rotation = 0) {
     metalness: 0.16,
   });
   const projectorTexture = new THREE.TextureLoader().load(
-    new URL("./projector-screen.png", import.meta.url).href,
+    new URL("./v2.png", import.meta.url).href,
   );
   projectorTexture.colorSpace = THREE.SRGBColorSpace;
   projectorTexture.center.set(0.5, 0.5);
