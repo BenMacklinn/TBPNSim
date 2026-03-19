@@ -4286,7 +4286,7 @@ function buildArchitecture() {
     start: toWorldPoint([PLAN_WIDTH, PLAN_DEPTH]),
     end: toWorldPoint([HANGAR_INNER_EAST_X, PLAN_DEPTH]),
     doorway: hallwaySouthDoorway,
-    color: "#f7f7f3",
+    color: HANGAR_GREENSCREEN_COLOR,
     thickness: OUTER_WALL_THICKNESS,
     capY: WALL_HEIGHT,
   });
@@ -4516,6 +4516,7 @@ function addHangarStructure() {
     archHeight,
     minWorldX: rearDoorEndX,
     maxWorldX: centerX + ground * innerScale,
+    color: HANGAR_GREENSCREEN_COLOR,
   });
   architectureGroup.add(rearInsideWallEast);
   collisionRects.push(
