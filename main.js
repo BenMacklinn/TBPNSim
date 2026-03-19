@@ -18889,15 +18889,16 @@ function syncPlayerPresentation(delta, elapsedTime) {
     isInEmptyCircleTableSeat(state.seatedSeat) &&
     state.seatedCameraView === "circleTable";
   const isFirstPersonCamera = state.mode === "walk" && state.walkView === "firstPerson" && !isCircleTableCamera;
+  const isSeated = Boolean(state.seatedSeat);
+  const showBodyInFirstPerson = isFirstPersonCamera && !isSeated;
   const avatarVisible =
     state.mode === "overview" ||
     state.walkView === "thirdPerson" ||
-    isFirstPersonCamera ||
+    showBodyInFirstPerson ||
     isCircleTableCamera;
-  const isSeated = Boolean(state.seatedSeat);
   const isCarryingGoalpost = Boolean(state.carriedGoalpost);
   playerAvatar.group.visible = avatarVisible;
-  // Keep the body visible in first person, but hide the local head so the camera never clips into the face.
+  // Keep the body visible in standing first person, but never render the local head into the camera.
   playerAvatar.neck.visible = !isFirstPersonCamera;
   playerAvatar.head.visible = !isFirstPersonCamera;
   playerAvatar.group.position.set(
