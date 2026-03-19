@@ -829,8 +829,8 @@ scene.add(camera);
 
 const overviewCameraPosition = new THREE.Vector3(9.5, 12.4, 12.8);
 const overviewTarget = new THREE.Vector3(0, 1.2, 0);
-const walkStartPlan = [12.45, HANGAR_REAR_PLAN_Z + 3.3];
-const walkLookTargetPlan = [12.24, HANGAR_REAR_PLAN_Z + 0.7];
+const walkStartPlan = [other5Doorway.centerX, other5Doorway.wallZ + 1.4];
+const walkLookTargetPlan = [planCenter.x, HANGAR_REAR_PLAN_Z + 2];
 const walkStart = new THREE.Vector3(
   walkStartPlan[0] - planCenter.x,
   PLAYER_HEIGHT,
@@ -4551,7 +4551,8 @@ function buildArchitecture() {
     start: toWorldPoint([PLAN_WIDTH, PLAN_DEPTH]),
     end: toWorldPoint([HANGAR_INNER_EAST_X, PLAN_DEPTH]),
     doorway: hallwaySouthDoorway,
-    color: HANGAR_GREENSCREEN_COLOR,
+    interiorColor: HANGAR_GREENSCREEN_COLOR,
+    exteriorColor: "#f7f7f3",
     thickness: OUTER_WALL_THICKNESS,
     capY: WALL_HEIGHT,
   });
@@ -4724,14 +4725,38 @@ function addHangarStructure() {
   // Keep the hangar front flush with the front wall axis instead of
   // extending past the plan equally in both directions.
   geometry.translate(centerX, 0, frontZ);
+  const hangarBaseColor = new THREE.Color(HANGAR_INTERIOR_WALL_COLOR);
+  const hangarGreenscreenColor = new THREE.Color(HANGAR_GREENSCREEN_COLOR);
+  const internBenBackdropMinPlanZ = 17.2;
+  const internBenBackdropMaxPlanZ = 22.6;
+  const internBenBackdropMaxPlanX = -0.8;
+  const positionAttribute = geometry.getAttribute("position");
+  const colorValues = new Float32Array(positionAttribute.count * 3);
+  for (let i = 0; i < positionAttribute.count; i += 1) {
+    const x = positionAttribute.getX(i);
+    const z = positionAttribute.getZ(i);
+    const planX = x + planCenter.x;
+    const planZ = z + planCenter.z;
+    const vertexColor =
+      planX <= internBenBackdropMaxPlanX &&
+      planZ >= internBenBackdropMinPlanZ &&
+      planZ <= internBenBackdropMaxPlanZ
+        ? hangarGreenscreenColor
+        : hangarBaseColor;
+    colorValues[i * 3] = vertexColor.r;
+    colorValues[i * 3 + 1] = vertexColor.g;
+    colorValues[i * 3 + 2] = vertexColor.b;
+  }
+  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colorValues, 3));
 
   const hangar = new THREE.Mesh(
     geometry,
     new THREE.MeshStandardMaterial({
-      color: HANGAR_INTERIOR_WALL_COLOR,
+      color: "#ffffff",
       roughness: 0.88,
       metalness: 0.05,
       side: THREE.DoubleSide,
+      vertexColors: true,
     }),
   );
   hangar.castShadow = true;
@@ -4761,7 +4786,8 @@ function addHangarStructure() {
     archHeight,
     minWorldX: centerX - ground * innerScale,
     maxWorldX: rearDoorStartX,
-    color: HANGAR_GREENSCREEN_COLOR,
+    interiorColor: HANGAR_GREENSCREEN_COLOR,
+    exteriorColor: "#f7f7f3",
   });
   architectureGroup.add(rearInsideWallWest);
   collisionRects.push(
@@ -4781,7 +4807,8 @@ function addHangarStructure() {
     archHeight,
     minWorldX: rearDoorEndX,
     maxWorldX: centerX + ground * innerScale,
-    color: HANGAR_GREENSCREEN_COLOR,
+    interiorColor: HANGAR_GREENSCREEN_COLOR,
+    exteriorColor: "#f7f7f3",
   });
   architectureGroup.add(rearInsideWallEast);
   collisionRects.push(
@@ -4979,7 +5006,8 @@ function addHangarStructure() {
     ground,
     innerScale,
     archHeight,
-    color: HANGAR_GREENSCREEN_COLOR,
+    interiorColor: HANGAR_GREENSCREEN_COLOR,
+    exteriorColor: HANGAR_GREENSCREEN_COLOR,
     offset: HANGAR_GREENSCREEN_OFFSET,
   });
   if (westGreenscreenPanel) {
@@ -5208,7 +5236,8 @@ function createPartialHangarInsetWall({
   archHeight,
   minWorldX,
   maxWorldX,
-  color = HANGAR_INTERIOR_WALL_COLOR,
+  interiorColor = HANGAR_INTERIOR_WALL_COLOR,
+  exteriorColor = interiorColor,
 }) {
   if (maxWorldX <= minWorldX + 0.001) {
     return null;
@@ -5233,17 +5262,38 @@ function createPartialHangarInsetWall({
   const geometry = new THREE.ShapeGeometry(shape, 32);
   geometry.translate(centerX, 0, wallZ);
 
-  const wall = new THREE.Mesh(
+  const wall = new THREE.Group();
+  const exteriorFace = new THREE.Mesh(
     geometry,
     new THREE.MeshStandardMaterial({
-      color,
+      color: exteriorColor,
       roughness: 0.9,
       metalness: 0.02,
       side: THREE.DoubleSide,
     }),
   );
-  wall.castShadow = true;
-  wall.receiveShadow = true;
+  exteriorFace.castShadow = true;
+  exteriorFace.receiveShadow = true;
+  wall.add(exteriorFace);
+
+  if (interiorColor !== exteriorColor) {
+    const interiorFace = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({
+        color: interiorColor,
+        roughness: 0.9,
+        metalness: 0.02,
+        side: THREE.FrontSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -2,
+      }),
+    );
+    interiorFace.castShadow = true;
+    interiorFace.receiveShadow = true;
+    interiorFace.renderOrder = 1;
+    wall.add(interiorFace);
+  }
   return wall;
 }
 
@@ -5256,7 +5306,8 @@ function createHangarSideWallPanel({
   ground,
   innerScale,
   archHeight,
-  color = HANGAR_INTERIOR_WALL_COLOR,
+  interiorColor = HANGAR_INTERIOR_WALL_COLOR,
+  exteriorColor = interiorColor,
   offset = 0,
 }) {
   if (endZ <= startZ + 0.001 || maxWorldX <= minWorldX + 0.001) {
@@ -5295,20 +5346,38 @@ function createHangarSideWallPanel({
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
 
-  const panel = new THREE.Mesh(
+  const panel = new THREE.Group();
+  const exteriorFace = new THREE.Mesh(
     geometry,
     new THREE.MeshStandardMaterial({
-      color,
+      color: exteriorColor,
       roughness: 0.88,
       metalness: 0.02,
       side: THREE.DoubleSide,
-      polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
     }),
   );
-  panel.castShadow = true;
-  panel.receiveShadow = true;
+  exteriorFace.castShadow = true;
+  exteriorFace.receiveShadow = true;
+  panel.add(exteriorFace);
+
+  if (interiorColor !== exteriorColor) {
+    const interiorFace = new THREE.Mesh(
+      geometry,
+      new THREE.MeshStandardMaterial({
+        color: interiorColor,
+        roughness: 0.88,
+        metalness: 0.02,
+        side: THREE.FrontSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -2,
+      }),
+    );
+    interiorFace.castShadow = true;
+    interiorFace.receiveShadow = true;
+    interiorFace.renderOrder = 1;
+    panel.add(interiorFace);
+  }
   return panel;
 }
 
@@ -17877,7 +17946,8 @@ function createSouthWallWithDoor({
   start,
   end,
   doorway,
-  color,
+  interiorColor = HANGAR_INTERIOR_WALL_COLOR,
+  exteriorColor = interiorColor,
   thickness,
   capY = WALL_HEIGHT,
 }) {
@@ -17922,18 +17992,84 @@ function createSouthWallWithDoor({
     bevelEnabled: false,
   });
   geometry.translate(0, 0, zCenter - thickness / 2);
+  const producerFaceZ = zCenter + thickness / 2 + 0.002;
+  const producerFaceGeometry = new THREE.ShapeGeometry(shape, 32);
+  producerFaceGeometry.translate(0, 0, producerFaceZ);
 
-  const wall = new THREE.Mesh(
+  const wall = new THREE.Group();
+  const exteriorWall = new THREE.Mesh(
     geometry,
     new THREE.MeshStandardMaterial({
-      color,
+      color: exteriorColor,
       roughness: 0.8,
       metalness: 0.03,
       side: THREE.DoubleSide,
     }),
   );
-  wall.castShadow = true;
-  wall.receiveShadow = true;
+  exteriorWall.castShadow = true;
+  exteriorWall.receiveShadow = true;
+  wall.add(exteriorWall);
+
+  if (interiorColor !== exteriorColor) {
+    const interiorFace = new THREE.Mesh(
+      producerFaceGeometry,
+      new THREE.MeshStandardMaterial({
+        color: interiorColor,
+        roughness: 0.8,
+        metalness: 0.03,
+        side: THREE.BackSide,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -2,
+      }),
+    );
+    interiorFace.castShadow = true;
+    interiorFace.receiveShadow = true;
+    interiorFace.renderOrder = 1;
+    wall.add(interiorFace);
+
+    const headerSamples = Math.max(10, Math.ceil((doorEndX - doorStartX) * 16));
+    const headerTopProfile = [];
+    let hasHeaderArea = false;
+    for (let i = 0; i <= headerSamples; i += 1) {
+      const x = doorStartX + ((doorEndX - doorStartX) * i) / headerSamples;
+      const y = Math.max(doorTop, Math.min(capY, hangarInnerHeightAtWorldX(x)));
+      if (y > doorTop + 0.001) {
+        hasHeaderArea = true;
+      }
+      headerTopProfile.push({ x, y });
+    }
+
+    if (hasHeaderArea) {
+      const headerShape = new THREE.Shape();
+      headerShape.moveTo(doorStartX, doorTop);
+      headerShape.lineTo(doorEndX, doorTop);
+      for (let i = headerTopProfile.length - 1; i >= 0; i -= 1) {
+        headerShape.lineTo(headerTopProfile[i].x, headerTopProfile[i].y);
+      }
+      headerShape.lineTo(doorStartX, doorTop);
+
+      const headerDepth = Math.min(Math.max(thickness * 0.16, 0.018), thickness - 0.12);
+      const headerGeometry = new THREE.ExtrudeGeometry(headerShape, {
+        depth: headerDepth,
+        bevelEnabled: false,
+      });
+      headerGeometry.translate(0, 0, zCenter + thickness / 2 - headerDepth + 0.004);
+
+      const headerCover = new THREE.Mesh(
+        headerGeometry,
+        new THREE.MeshStandardMaterial({
+          color: interiorColor,
+          roughness: 0.8,
+          metalness: 0.03,
+        }),
+      );
+      headerCover.castShadow = true;
+      headerCover.receiveShadow = true;
+      headerCover.renderOrder = 2;
+      wall.add(headerCover);
+    }
+  }
   return wall;
 }
 
