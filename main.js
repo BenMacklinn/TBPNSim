@@ -61,6 +61,19 @@ const THIRD_PERSON_CAMERA_HEIGHT = 1.15;
 const THIRD_PERSON_TARGET_DROP = 0.18;
 const THIRD_PERSON_SEATED_AVATAR_DROP = 0.17;
 const CAMERA_COLLISION_PADDING = 0.22;
+const EMPTY_CIRCLE_TABLE_SEAT_CENTER = [6.5, 32.7];
+const SEATED_CIRCLE_TABLE_CAMERA_PLAN = [6.5, 26.2];
+const SEATED_CIRCLE_TABLE_TARGET_PLAN = [6.5, 30.0];
+const SEATED_CIRCLE_TABLE_CAMERA_Y = 1.9;
+const SEATED_CIRCLE_TABLE_CAMERA_FOV = 56;
+
+function isInEmptyCircleTableSeat(seat) {
+  if (!seat?.center) return false;
+  return (
+    Math.abs(seat.center[0] - EMPTY_CIRCLE_TABLE_SEAT_CENTER[0]) < 0.01 &&
+    Math.abs(seat.center[1] - EMPTY_CIRCLE_TABLE_SEAT_CENTER[1]) < 0.01
+  );
+}
 const THIRD_PERSON_CAMERA_MIN_DISTANCE = 0;
 const WALK_SPEED = 2.35;
 const SPRINT_MULTIPLIER = 1.55;
@@ -567,6 +580,8 @@ const interactionPromptLine = document.querySelector("#interactionPromptLine");
 const interactionPromptCooldown = document.querySelector("#interactionPromptCooldown");
 const interactionPromptCooldownFill = document.querySelector("#interactionPromptCooldownFill");
 const walkKeyHud = document.querySelector("#walkKeyHud");
+const walkNumKeys = document.querySelector("#walkNumKeys");
+const seatedSpacePrompt = document.querySelector("#seatedSpacePrompt");
 const walkLogoHud = document.querySelector("#walkLogoHud");
 const walkKeyW = document.querySelector("#walkKeyW");
 const walkKeyA = document.querySelector("#walkKeyA");
@@ -574,6 +589,8 @@ const walkKeyS = document.querySelector("#walkKeyS");
 const walkKeyD = document.querySelector("#walkKeyD");
 const walkKeyShift = document.querySelector("#walkKeyShift");
 const walkKeyJump = document.querySelector("#walkKeyJump");
+const walkKey1 = document.querySelector("#walkKey1");
+const walkKey2 = document.querySelector("#walkKey2");
 const chatToggleButton = document.querySelector("#chatToggleButton");
 const chatPanel = document.querySelector("#chatPanel");
 const chatForm = document.querySelector("#chatForm");
@@ -835,6 +852,8 @@ const cameraForwardVector = new THREE.Vector3();
 const cameraDirectionVector = new THREE.Vector3();
 const producerManShotPosition = new THREE.Vector3();
 const producerManShotTarget = new THREE.Vector3();
+const seatedCircleTableCameraPosition = new THREE.Vector3();
+const seatedCircleTableCameraTarget = new THREE.Vector3();
 const goalpostPlacementTarget = new THREE.Vector3();
 const goalpostPlacementDirection = new THREE.Vector3();
 const goalpostPlacementNdc = new THREE.Vector2(0, 0);
@@ -885,6 +904,7 @@ orbitControls.enabled = false;
 const state = {
   mode: "walk",
   walkView: "firstPerson",
+  seatedCameraView: "normal",
   moveForward: false,
   moveBackward: false,
   moveLeft: false,
@@ -1555,6 +1575,10 @@ function shouldProjectorDisplayBeAudible(display) {
 
 function isProjectorDisplayVisibleFromCamera(display) {
   if (!display?.mesh || !display.requestedVisible) {
+    return false;
+  }
+
+  if (state.seatedSeat && isInEmptyCircleTableSeat(state.seatedSeat) && state.seatedCameraView === "circleTable") {
     return false;
   }
 
@@ -2782,10 +2806,16 @@ function setSharedSeatOccupancy(seat, occupiedByClientId = "", { eventOrder = 0 
   seat.occupiedByClientId = nextOccupiedByClientId;
 
   if (state.seatedSeat === seat && nextOccupiedByClientId !== multiplayerClientId) {
+    const wasCircleTableView = state.seatedCameraView === "circleTable";
     state.seatedSeat = null;
+    state.seatedCameraView = "normal";
+    if (wasCircleTableView) {
+      refreshProjectorStatus();
+    }
     playerState.motion = 0;
     state.velocityY = 0;
     playerState.position.y = Math.max(playerState.position.y, PLAYER_HEIGHT);
+    syncUi();
   }
 
   return true;
@@ -17124,6 +17154,10 @@ function updateInteractionPrompt(elapsedTime) {
   }
 
   if (state.seatedSeat) {
+    if (isInEmptyCircleTableSeat(state.seatedSeat) && state.seatedCameraView === "circleTable") {
+      hideInteractionPrompt();
+      return;
+    }
     if (!positionInteractionPrompt({
       interactionPoint: state.seatedSeat.interactionPoint,
       promptOffsetY: 0.28,
@@ -17133,7 +17167,9 @@ function updateInteractionPrompt(elapsedTime) {
     }
     interactionPromptEyebrow.textContent = "Seat";
     interactionPromptTitle.textContent = "Press E to Stand";
-    interactionPromptLine.textContent = "Leave the seat.";
+    interactionPromptLine.textContent = isInEmptyCircleTableSeat(state.seatedSeat)
+      ? "Leave the seat. Space to view from camera behind shelf."
+      : "Leave the seat.";
     setInteractionPromptCooldown(false);
     interactionPrompt.classList.remove("npc-prompt--hidden");
     interactionPrompt.setAttribute("aria-hidden", "false");
@@ -17386,6 +17422,7 @@ function sitInSeat(seat, { broadcast = true, issuedAt = Date.now() } = {}) {
       occupiedByClientId: multiplayerClientId,
     }, issuedAt);
   }
+  syncUi();
   return true;
 }
 
@@ -17491,8 +17528,13 @@ function standUpFromSeat({ broadcast = true, issuedAt = Date.now() } = {}) {
       return isWalkable(new THREE.Vector2(world.x, world.z));
     }) ?? candidates[0];
   const standWorld = toWorldPoint(standPoint);
+  const wasCircleTableView = state.seatedCameraView === "circleTable";
   state.seatedSeat = null;
+  state.seatedCameraView = "normal";
   playerState.position.set(standWorld.x, PLAYER_HEIGHT, standWorld.z);
+  if (wasCircleTableView) {
+    refreshProjectorStatus();
+  }
   playerState.motion = 0;
   state.velocityY = 0;
   if (broadcast) {
@@ -17501,6 +17543,7 @@ function standUpFromSeat({ broadcast = true, issuedAt = Date.now() } = {}) {
       occupiedByClientId: "",
     }, issuedAt);
   }
+  syncUi();
 }
 
 function toggleNearestInteraction() {
@@ -18708,6 +18751,7 @@ function createPlayerAvatar({
     root,
     shadow,
     torso,
+    neck,
     head,
     leftArmPivot,
     rightArmPivot,
@@ -18840,10 +18884,22 @@ function isObjectWithinRoot(object, root) {
 }
 
 function syncPlayerPresentation(delta, elapsedTime) {
-  const avatarVisible = state.mode === "overview" || state.walkView === "thirdPerson";
+  const isCircleTableCamera =
+    Boolean(state.seatedSeat) &&
+    isInEmptyCircleTableSeat(state.seatedSeat) &&
+    state.seatedCameraView === "circleTable";
+  const isFirstPersonCamera = state.mode === "walk" && state.walkView === "firstPerson" && !isCircleTableCamera;
+  const avatarVisible =
+    state.mode === "overview" ||
+    state.walkView === "thirdPerson" ||
+    isFirstPersonCamera ||
+    isCircleTableCamera;
   const isSeated = Boolean(state.seatedSeat);
   const isCarryingGoalpost = Boolean(state.carriedGoalpost);
   playerAvatar.group.visible = avatarVisible;
+  // Keep the body visible in first person, but hide the local head so the camera never clips into the face.
+  playerAvatar.neck.visible = !isFirstPersonCamera;
+  playerAvatar.head.visible = !isFirstPersonCamera;
   playerAvatar.group.position.set(
     playerState.position.x,
     Math.max(0, playerState.position.y - PLAYER_HEIGHT),
@@ -18858,10 +18914,10 @@ function syncPlayerPresentation(delta, elapsedTime) {
     ) * turnStep;
 
     if (isSeated) {
-      const seatedAvatarDrop =
-        state.mode === "walk" && state.walkView === "thirdPerson"
-          ? THIRD_PERSON_SEATED_AVATAR_DROP
-          : 0;
+      const isExternalView =
+        (state.mode === "walk" && state.walkView === "thirdPerson") ||
+        (state.seatedSeat && isInEmptyCircleTableSeat(state.seatedSeat) && state.seatedCameraView === "circleTable");
+      const seatedAvatarDrop = isExternalView ? THIRD_PERSON_SEATED_AVATAR_DROP : 0;
       playerAvatar.leftArmPivot.rotation.x = -0.18;
       playerAvatar.rightArmPivot.rotation.x = -0.18;
       playerAvatar.leftArmPivot.rotation.z = 0;
@@ -18906,6 +18962,16 @@ function syncPlayerPresentation(delta, elapsedTime) {
     return;
   }
 
+  if (state.seatedSeat && isInEmptyCircleTableSeat(state.seatedSeat) && state.seatedCameraView === "circleTable") {
+    setVectorFromPlanPoint(seatedCircleTableCameraPosition, SEATED_CIRCLE_TABLE_CAMERA_PLAN, SEATED_CIRCLE_TABLE_CAMERA_Y);
+    setVectorFromPlanPoint(seatedCircleTableCameraTarget, SEATED_CIRCLE_TABLE_TARGET_PLAN, 1.0);
+    setCameraFov(SEATED_CIRCLE_TABLE_CAMERA_FOV);
+    camera.position.copy(seatedCircleTableCameraPosition);
+    camera.lookAt(seatedCircleTableCameraTarget);
+    return;
+  }
+
+  setCameraFov(DEFAULT_CAMERA_FOV);
   if (state.walkView === "firstPerson") {
     camera.position.copy(playerState.position);
     lookEuler.set(playerState.pitch, playerState.yaw, 0);
@@ -19224,9 +19290,22 @@ function syncUi() {
     const visible = state.mode === "walk" && sessionActive;
     walkKeyHud.setAttribute("aria-hidden", visible ? "false" : "true");
   }
+  if (walkNumKeys) {
+    const visible = state.mode === "walk" && sessionActive;
+    walkNumKeys.setAttribute("aria-hidden", visible ? "false" : "true");
+  }
   if (walkLogoHud) {
     const visible = state.mode === "walk" && sessionActive;
     walkLogoHud.setAttribute("aria-hidden", visible ? "false" : "true");
+  }
+  if (seatedSpacePrompt) {
+    const visible =
+      state.mode === "walk" &&
+      sessionActive &&
+      state.seatedSeat &&
+      isInEmptyCircleTableSeat(state.seatedSeat);
+    seatedSpacePrompt.hidden = !visible;
+    seatedSpacePrompt.setAttribute("aria-hidden", visible ? "false" : "true");
   }
   syncWalkKeyHud();
   syncMultiplayerHud();
@@ -19246,6 +19325,13 @@ function syncWalkKeyHud() {
   walkKeyD.dataset.active = state.mode === "walk" && state.moveRight ? "true" : "false";
   walkKeyShift.dataset.active = state.mode === "walk" && state.sprint ? "true" : "false";
   walkKeyJump.dataset.active = state.mode === "walk" && walkHudJumpActive ? "true" : "false";
+
+  if (walkKey1) {
+    walkKey1.dataset.active = state.mode === "walk" && state.walkView === "firstPerson" ? "true" : "false";
+  }
+  if (walkKey2) {
+    walkKey2.dataset.active = state.mode === "walk" && state.walkView === "thirdPerson" ? "true" : "false";
+  }
 }
 
 function onResize() {
@@ -19399,11 +19485,21 @@ function onKeyDown(event) {
       break;
     case "Space":
       if (state.mode === "walk" && isPointerLocked) {
-        event.preventDefault();
-        walkHudJumpActive = true;
-        syncWalkKeyHud();
-        if (playerState.position.y <= PLAYER_HEIGHT + 0.01) {
-          state.velocityY = JUMP_VELOCITY;
+        if (state.seatedSeat && isInEmptyCircleTableSeat(state.seatedSeat) && !event.repeat) {
+          event.preventDefault();
+          const wasCircleTable = state.seatedCameraView === "circleTable";
+          state.seatedCameraView = wasCircleTable ? "normal" : "circleTable";
+          if (wasCircleTable) {
+            refreshProjectorStatus();
+          } else {
+            applyProjectorFallbackTexture();
+          }
+        } else if (!state.seatedSeat) {
+          walkHudJumpActive = true;
+          syncWalkKeyHud();
+          if (playerState.position.y <= PLAYER_HEIGHT + 0.01) {
+            state.velocityY = JUMP_VELOCITY;
+          }
         }
       }
       break;
