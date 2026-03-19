@@ -13897,25 +13897,12 @@ function setThirdPersonGoalpostCarryPose(goalpost) {
 
 function setGoalpostCarryPose(goalpost) {
   if (state.walkView === "firstPerson") {
-    getLookDirection(playerState.yaw, playerState.pitch, goalpostHoldForward);
-    goalpostHoldRight.setFromMatrixColumn(camera.matrixWorld, 0).normalize();
-    goalpostHoldPosition.copy(camera.position)
-      .addScaledVector(goalpostHoldForward, GOALPOST_HOLD_FORWARD_FIRST_PERSON)
-      .addScaledVector(goalpostHoldRight, GOALPOST_HOLD_SIDE_FIRST_PERSON);
-    goalpostHoldPosition.y += GOALPOST_HOLD_VERTICAL_FIRST_PERSON;
-  } else {
-    setThirdPersonGoalpostCarryPose(goalpost);
+    playerAvatar.root.rotation.y = playerState.yaw;
+    setThirdPersonGoalpostCarryPoseForAvatar(goalpost, playerAvatar, playerState.yaw);
     return;
   }
 
-  goalpost.object.position.copy(goalpostHoldPosition);
-  goalpost.object.rotation.set(
-    GOALPOST_HOLD_TILT_X,
-    playerState.facingYaw,
-    GOALPOST_HOLD_TILT_Z,
-  );
-  goalpost.heldPosition.copy(goalpostHoldPosition);
-  updateGoalpostInteractionPoint(goalpost);
+  setThirdPersonGoalpostCarryPose(goalpost);
 }
 
 function registerSeat(
@@ -15532,7 +15519,15 @@ function finalizeHorseStatuePlacement(statue, sculptureBounds = null) {
   });
 }
 
-function getGoalpostPlacementTarget(target = new THREE.Vector3()) {
+function getGoalpostDropRotation() {
+  return state.walkView === "firstPerson" ? playerState.yaw : playerState.facingYaw;
+}
+
+function getGoalpostPlacementTarget(goalpost, target = new THREE.Vector3()) {
+  if (state.walkView === "firstPerson" && goalpost) {
+    return target.copy(goalpost.heldPosition).setY(0);
+  }
+
   getFlatLookDirection(playerState.facingYaw, goalpostPlacementDirection);
   return target
     .copy(playerState.position)
@@ -15623,9 +15618,22 @@ function isGoalpostPlacementValid(goalpost, position, rotation = goalpost.object
   return true;
 }
 
+function isPlayerOverlappingGoalpost(position, rotation) {
+  const clearanceRect = buildGoalpostColliderRect(position, rotation);
+  clearanceRect.minX -= PLAYER_RADIUS;
+  clearanceRect.maxX += PLAYER_RADIUS;
+  clearanceRect.minZ -= PLAYER_RADIUS;
+  clearanceRect.maxZ += PLAYER_RADIUS;
+  return pointInRect({ x: playerState.position.x, y: playerState.position.z }, clearanceRect);
+}
+
 function movePlayerOutOfDroppedGoalpost(goalpost) {
   const center = goalpost.previewPosition;
-  const forward = getFlatLookDirection(playerState.facingYaw, goalpostHoldForward);
+  if (!isPlayerOverlappingGoalpost(center, goalpost.object.rotation.y)) {
+    return;
+  }
+
+  const forward = getFlatLookDirection(goalpost.object.rotation.y, goalpostHoldForward);
   const right = goalpostHoldRight.set(-forward.z, 0, forward.x).normalize();
   const clearance = GOALPOST_PLAYER_CLEARANCE;
   const candidateOffsets = [
@@ -15663,8 +15671,9 @@ function updateCarriedGoalpostPlacement() {
     return;
   }
 
-  const dropRotation = playerState.facingYaw;
-  const candidate = getGoalpostPlacementTarget(goalpostPlacementTarget);
+  setGoalpostCarryPose(goalpost);
+  const dropRotation = getGoalpostDropRotation();
+  const candidate = getGoalpostPlacementTarget(goalpost, goalpostPlacementTarget);
   const canDrop = isGoalpostPlacementValid(goalpost, candidate, dropRotation);
   goalpost.canDrop = canDrop;
   goalpost.lastPlacedRotation = dropRotation;
@@ -15672,7 +15681,6 @@ function updateCarriedGoalpostPlacement() {
     goalpost.lastValidPreviewPosition.copy(candidate);
   }
   goalpost.previewPosition.copy(candidate);
-  setGoalpostCarryPose(goalpost);
 }
 
 function startCarryingGoalpost(goalpost, { broadcast = true, issuedAt = Date.now() } = {}) {
