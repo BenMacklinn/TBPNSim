@@ -1151,7 +1151,16 @@ function getProjectorReplayStartAt(status) {
     typeof status?.replayDurationSeconds === "number" && Number.isFinite(status.replayDurationSeconds)
       ? Math.max(0, Math.floor(status.replayDurationSeconds))
       : 0;
-  return durationSeconds > 1 ? Math.min(PROJECTOR_REPLAY_START_SECONDS, durationSeconds - 1) : 0;
+  const baselineStartAt =
+    durationSeconds > 1 ? Math.min(PROJECTOR_REPLAY_START_SECONDS, durationSeconds - 1) : 0;
+  const startedAtMs = parseProjectorTimestampMs(status?.replayStartedAt);
+  if (!startedAtMs || durationSeconds <= baselineStartAt + 1) {
+    return baselineStartAt;
+  }
+
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+  const replayWindowSeconds = Math.max(1, durationSeconds - baselineStartAt);
+  return baselineStartAt + (elapsedSeconds % replayWindowSeconds);
 }
 
 function loadStoredProjectorVideoId() {
@@ -1354,7 +1363,6 @@ function showProjectorDisplayOverlay(display, videoId = "", options = {}) {
   const shouldReload =
     display.youtubeVideoId !== nextVideoId ||
     Boolean(display.youtubeOptions?.replay) !== nextReplay ||
-    display.youtubeOptions?.startAt !== nextStartAt ||
     !hasCurrentEmbed;
   if (shouldReload) {
     display.cssIframe.src = buildProjectorYoutubeEmbedUrl(nextVideoId, {
