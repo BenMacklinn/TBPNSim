@@ -563,6 +563,8 @@ const interactionPrompt = document.querySelector("#interactionPrompt");
 const interactionPromptEyebrow = document.querySelector("#interactionPromptEyebrow");
 const interactionPromptTitle = document.querySelector("#interactionPromptTitle");
 const interactionPromptLine = document.querySelector("#interactionPromptLine");
+const interactionPromptCooldown = document.querySelector("#interactionPromptCooldown");
+const interactionPromptCooldownFill = document.querySelector("#interactionPromptCooldownFill");
 const walkKeyHud = document.querySelector("#walkKeyHud");
 const walkLogoHud = document.querySelector("#walkLogoHud");
 const walkKeyW = document.querySelector("#walkKeyW");
@@ -16799,6 +16801,15 @@ function updateInteractiveNpcs(elapsedTime) {
 function hideInteractionPrompt() {
   interactionPrompt.classList.add("npc-prompt--hidden");
   interactionPrompt.setAttribute("aria-hidden", "true");
+  interactionPromptCooldown.hidden = true;
+  interactionPromptCooldown.setAttribute("aria-hidden", "true");
+  interactionPromptCooldownFill.style.transform = "scaleX(0)";
+}
+
+function setInteractionPromptCooldown(visible, progress = 0) {
+  interactionPromptCooldown.hidden = !visible;
+  interactionPromptCooldown.setAttribute("aria-hidden", visible ? "false" : "true");
+  interactionPromptCooldownFill.style.transform = `scaleX(${Math.max(0, Math.min(1, progress))})`;
 }
 
 function getInteractionDistanceLimit(type, target) {
@@ -16891,6 +16902,7 @@ function updateInteractionPrompt(elapsedTime) {
     interactionPromptEyebrow.textContent = "Seat";
     interactionPromptTitle.textContent = "Press E to Stand";
     interactionPromptLine.textContent = "Leave the seat.";
+    setInteractionPromptCooldown(false);
     interactionPrompt.classList.remove("npc-prompt--hidden");
     interactionPrompt.setAttribute("aria-hidden", "false");
     return;
@@ -16908,6 +16920,7 @@ function updateInteractionPrompt(elapsedTime) {
     interactionPromptLine.textContent = state.carriedGoalpost.canDrop
       ? "Drop it right in front of you."
       : "Keep the floor in front clear.";
+    setInteractionPromptCooldown(false);
     interactionPrompt.classList.remove("npc-prompt--hidden");
     interactionPrompt.setAttribute("aria-hidden", "false");
     return;
@@ -16926,18 +16939,27 @@ function updateInteractionPrompt(elapsedTime) {
         ? "Press E to Close Door"
         : "Press E to Open Door";
     interactionPromptLine.textContent = nearestInteraction.target.name;
+    setInteractionPromptCooldown(false);
   } else if (nearestInteraction.type === "seat") {
     interactionPromptEyebrow.textContent = "Seat";
     interactionPromptTitle.textContent = "Press E to Sit";
     interactionPromptLine.textContent = "Take a seat.";
+    setInteractionPromptCooldown(false);
   } else if (nearestInteraction.type === "gong") {
     interactionPromptEyebrow.textContent = "Gong";
-    interactionPromptTitle.textContent = "Press E to strike";
-    interactionPromptLine.textContent = "Ring the gong.";
+    if (gongAudioLocked) {
+      interactionPromptTitle.textContent = "Gong cooling down";
+      interactionPromptLine.textContent = "Wait for the ring to finish.";
+    } else {
+      interactionPromptTitle.textContent = "Press E to strike";
+      interactionPromptLine.textContent = "Ring the gong.";
+    }
+    setInteractionPromptCooldown(gongAudioLocked, getGongCooldownProgress());
   } else if (nearestInteraction.type === "goalpost") {
     interactionPromptEyebrow.textContent = "Goal Post";
     interactionPromptTitle.textContent = "Press E to Pick Up";
     interactionPromptLine.textContent = "Carry it to a new spot.";
+    setInteractionPromptCooldown(false);
   } else {
     interactionPromptEyebrow.textContent = nearestInteraction.target.promptEyebrow;
     interactionPromptTitle.textContent = nearestInteraction.target.promptTitle;
@@ -16945,6 +16967,7 @@ function updateInteractionPrompt(elapsedTime) {
       nearestInteraction.target.lines[
         Math.floor(elapsedTime / 3.2) % nearestInteraction.target.lines.length
       ];
+    setInteractionPromptCooldown(false);
   }
 
   interactionPrompt.classList.remove("npc-prompt--hidden");
@@ -17130,18 +17153,42 @@ function sitInSeat(seat, { broadcast = true, issuedAt = Date.now() } = {}) {
 }
 
 let gongAudio = null;
+let gongAudioLocked = false;
+
+function getGongCooldownProgress() {
+  if (!gongAudioLocked || !gongAudio) {
+    return 0;
+  }
+  const duration = Number.isFinite(gongAudio.duration) ? gongAudio.duration : 0;
+  if (duration <= 1.001) {
+    return 1;
+  }
+  const playableDuration = duration - 1;
+  const remaining = Math.max(0, duration - gongAudio.currentTime);
+  return Math.min(1, remaining / playableDuration);
+}
 
 function strikeGong(gong, { broadcast = true, issuedAt = Date.now(), eventOrder = 0 } = {}) {
   if (!gong) {
-    return;
+    return false;
   }
 
+  if (!gongAudio) {
+    gongAudio = new Audio(new URL("./Gong Sound Effect 4.mp3", import.meta.url).href);
+    gongAudio.addEventListener("ended", () => {
+      gongAudioLocked = false;
+    });
+    gongAudio.addEventListener("error", () => {
+      gongAudioLocked = false;
+    });
+  }
+  if (gongAudioLocked) {
+    return false;
+  }
+  gongAudioLocked = true;
   const resolvedEventOrder =
     Number.isFinite(eventOrder) && eventOrder > 0 ? eventOrder : nextMultiplayerWorldEventOrder();
   recordMultiplayerWorldEvent(gong, resolvedEventOrder);
-  if (!gongAudio) {
-    gongAudio = new Audio(new URL("./Gong Sound Effect 4.mp3", import.meta.url).href);
-  }
   const startAnimation = () => {
     gongHitAnimations.push({
       discParts: gong.discParts,
@@ -17153,12 +17200,15 @@ function strikeGong(gong, { broadcast = true, issuedAt = Date.now(), eventOrder 
   gongAudio._gongPlayingHandler = startAnimation;
   gongAudio.addEventListener("playing", startAnimation, { once: true });
   gongAudio.currentTime = 1;
-  gongAudio.play().catch(() => {});
+  gongAudio.play().catch(() => {
+    gongAudioLocked = false;
+  });
   if (broadcast) {
     broadcastMultiplayerWorldEvent("gong-strike", {
       gongId: gong.id,
     }, issuedAt);
   }
+  return true;
 }
 
 function updateGongAnimations() {
