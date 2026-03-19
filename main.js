@@ -3774,10 +3774,19 @@ function closeSessionGate() {
     return;
   }
 
-  sessionGate.hidden = true;
-  sessionGate.setAttribute("aria-hidden", "true");
-  setSessionGateMessage("");
-  syncUi();
+  sessionGate.classList.add("session-gate--closing");
+  sessionGate.addEventListener(
+    "transitionend",
+    function onCloseTransitionEnd() {
+      sessionGate.removeEventListener("transitionend", onCloseTransitionEnd);
+      sessionGate.classList.remove("session-gate--closing");
+      sessionGate.hidden = true;
+      sessionGate.setAttribute("aria-hidden", "true");
+      setSessionGateMessage("");
+      syncUi();
+    },
+    { once: true },
+  );
 }
 
 async function fetchLeaderboard() {
