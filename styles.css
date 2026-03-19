@@ -41,7 +41,12 @@ body {
   overflow: hidden;
 }
 
+.projector-overlay-layer--fullscreen {
+  z-index: 241;
+}
+
 .projector-youtube-shell {
+  position: relative;
   overflow: hidden;
   background: #000;
   border-radius: 10px;
@@ -61,6 +66,76 @@ body {
   pointer-events: none;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
+}
+
+.projector-youtube-fullscreen-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 92px;
+  height: 42px;
+  padding: 0 16px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 0;
+  background: rgba(6, 8, 12, 0.74);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+.projector-youtube-shell--fullscreen .projector-youtube-fullscreen-close {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.projector-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 240;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: rgba(0, 0, 0, 0.96);
+}
+
+.projector-fullscreen[hidden] {
+  display: none;
+}
+
+.projector-fullscreen__close {
+  justify-self: end;
+  margin: 20px 20px 0 0;
+  padding: 10px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.projector-fullscreen__stage {
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px 20px 28px;
+}
+
+.projector-youtube-shell--fullscreen {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  transform: none !important;
+  margin: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
 }
 
 .session-gate {

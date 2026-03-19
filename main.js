@@ -39,6 +39,7 @@ const PROJECTOR_STATUS_REFRESH_MS = 30000;
 const PROJECTOR_HLS_MIME_TYPE = "application/vnd.apple.mpegurl";
 const PROJECTOR_YOUTUBE_CHANNEL_ID = "UC-DRzaGnL_vtBUpCFH5M0tg";
 const PROJECTOR_LAST_VIDEO_STORAGE_KEY = "tbpn-projector-last-video-id";
+const PROJECTOR_REPLAY_START_SECONDS = 5 * 60;
 const PROJECTOR_SCREEN_WIDTH = 3.8;
 const PROJECTOR_SCREEN_HEIGHT = 2.62;
 const FRONT_ROOM_TV_SCREEN_WIDTH = 1.04;
@@ -790,6 +791,10 @@ projectorCssRenderer.setSize(window.innerWidth, window.innerHeight);
 projectorCssRenderer.domElement.className = "projector-overlay-layer";
 projectorCssRenderer.domElement.setAttribute("aria-hidden", "true");
 document.body.append(projectorCssRenderer.domElement);
+const {
+  root: projectorFullscreenOverlay,
+  closeButton: projectorFullscreenCloseButton,
+} = createProjectorFullscreenOverlay();
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#959a94");
@@ -1026,6 +1031,7 @@ const interactiveSeats = [];
 const interactiveNpcs = [];
 const interactiveGongs = [];
 const interactiveGoalposts = [];
+const interactiveProjectors = [];
 const gongHitAnimations = [];
 const mirrorDistanceLods = [];
 const slidingShelfCameras = [];
@@ -1093,10 +1099,47 @@ function normalizeProjectorStatusPayload(payload) {
 
   return {
     live: Boolean(payload.live ?? payload.isLive),
+    mode: typeof payload.mode === "string" ? payload.mode.trim() : "",
+    replay:
+      typeof payload.replay === "boolean"
+        ? payload.replay
+        : ["replay", "archive_pending"].includes(typeof payload.mode === "string" ? payload.mode.trim() : ""),
     playbackUrl,
     mimeType,
     videoId: typeof payload.videoId === "string" ? payload.videoId.trim() : "",
+    replayStartedAt: typeof payload.replayStartedAt === "string" ? payload.replayStartedAt.trim() : "",
+    replayDurationSeconds:
+      typeof payload.replayDurationSeconds === "number" && Number.isFinite(payload.replayDurationSeconds)
+        ? Math.max(0, Math.floor(payload.replayDurationSeconds))
+        : 0,
+    error: typeof payload.error === "string" ? payload.error.trim() : "",
   };
+}
+
+function parseProjectorTimestampMs(value) {
+  if (!value) {
+    return 0;
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function getProjectorReplayStartAt(status) {
+  const durationSeconds =
+    typeof status?.replayDurationSeconds === "number" && Number.isFinite(status.replayDurationSeconds)
+      ? Math.max(0, Math.floor(status.replayDurationSeconds))
+      : 0;
+  const baselineStartAt =
+    durationSeconds > 1 ? Math.min(PROJECTOR_REPLAY_START_SECONDS, durationSeconds - 1) : 0;
+  const startedAtMs = parseProjectorTimestampMs(status?.replayStartedAt);
+  if (!startedAtMs || durationSeconds <= baselineStartAt + 1) {
+    return baselineStartAt;
+  }
+
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+  const replayWindowSeconds = Math.max(1, durationSeconds - baselineStartAt);
+  return baselineStartAt + (elapsedSeconds % replayWindowSeconds);
 }
 
 function loadStoredProjectorVideoId() {
@@ -1126,7 +1169,7 @@ function rememberProjectorVideoId(videoId = "") {
   }
 }
 
-function buildProjectorYoutubeEmbedUrl(videoId = "", { replay = false } = {}) {
+function buildProjectorYoutubeEmbedUrl(videoId = "", { replay = false, startAt = 0 } = {}) {
   const params = new URLSearchParams({
     autoplay: "1",
     mute: "1",
@@ -1141,10 +1184,18 @@ function buildProjectorYoutubeEmbedUrl(videoId = "", { replay = false } = {}) {
   }
 
   if (videoId) {
+    const resolvedStartAt =
+      Number.isFinite(startAt) && startAt > 0
+        ? Math.max(0, Math.floor(startAt))
+        : replay
+        ? PROJECTOR_REPLAY_START_SECONDS
+        : 0;
+    if (resolvedStartAt > 0) {
+      params.set("start", String(resolvedStartAt));
+    }
     if (replay) {
       params.set("loop", "1");
       params.set("playlist", videoId);
-      params.set("start", "0");
     }
     return `https://www.youtube.com/embed/${encodeURIComponent(videoId)}?${params.toString()}`;
   }
@@ -1168,6 +1219,19 @@ function createProjectorYoutubeDisplay(parent, mesh, width, height, title, front
   iframe.tabIndex = -1;
   shell.append(iframe);
 
+  const fullscreenCloseButton = document.createElement("button");
+  fullscreenCloseButton.className = "projector-youtube-fullscreen-close";
+  fullscreenCloseButton.type = "button";
+  fullscreenCloseButton.textContent = "Close";
+  fullscreenCloseButton.setAttribute("aria-hidden", "true");
+  fullscreenCloseButton.tabIndex = -1;
+  fullscreenCloseButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    closeProjectorFullscreen();
+  });
+  shell.append(fullscreenCloseButton);
+
   const cssObject = new CSS3DObject(shell);
   cssObject.position.copy(mesh.position);
   cssObject.rotation.copy(mesh.rotation);
@@ -1181,8 +1245,12 @@ function createProjectorYoutubeDisplay(parent, mesh, width, height, title, front
 
   const display = {
     cssObject,
+    cssShell: shell,
     cssIframe: iframe,
+    fullscreenCloseButton,
     youtubeVideoId: "",
+    youtubeOptions: { replay: false, startAt: 0 },
+    currentTime: 0,
     mesh,
     width,
     height,
@@ -1190,6 +1258,7 @@ function createProjectorYoutubeDisplay(parent, mesh, width, height, title, front
     surfaceOffset: 0.02,
     requestedVisible: false,
     requiresViewingArea: false,
+    isDetachedToFullscreen: false,
   };
   if (mesh.geometry) {
     mesh.geometry.computeBoundingBox();
@@ -1242,6 +1311,8 @@ function hideProjectorDisplayOverlay(display) {
   }
 
   display.youtubeVideoId = "";
+  display.youtubeOptions = { replay: false, startAt: 0 };
+  display.currentTime = 0;
   display.requestedVisible = false;
   display.cssObject.visible = false;
   display.cssIframe.removeAttribute("src");
@@ -1253,14 +1324,158 @@ function showProjectorDisplayOverlay(display, videoId = "", options = {}) {
   }
 
   const nextVideoId = videoId || "";
-  const nextUrl = buildProjectorYoutubeEmbedUrl(nextVideoId, options);
-  if (display.youtubeVideoId !== nextVideoId || display.cssIframe.src !== nextUrl) {
-    display.cssIframe.src = nextUrl;
+  const nextReplay = Boolean(options?.replay);
+  const nextStartAt =
+    Number.isFinite(options?.startAt) && options.startAt > 0 ? Math.floor(options.startAt) : 0;
+  const hasCurrentEmbed = Boolean(display.cssIframe.getAttribute("src"));
+  const shouldReload =
+    display.youtubeVideoId !== nextVideoId ||
+    Boolean(display.youtubeOptions?.replay) !== nextReplay ||
+    !hasCurrentEmbed;
+  if (shouldReload) {
+    display.cssIframe.src = buildProjectorYoutubeEmbedUrl(nextVideoId, {
+      replay: nextReplay,
+      startAt: nextStartAt,
+    });
     display.youtubeVideoId = nextVideoId;
+    display.currentTime = 0;
   }
+  display.youtubeOptions = { replay: nextReplay, startAt: nextStartAt };
 
   display.requestedVisible = true;
   display.cssObject.visible = isProjectorDisplayVisibleFromCamera(display);
+}
+
+function createProjectorFullscreenOverlay() {
+  const root = document.createElement("div");
+  root.className = "projector-fullscreen";
+  root.setAttribute("aria-hidden", "true");
+  root.hidden = true;
+
+  const closeButton = document.createElement("button");
+  closeButton.className = "projector-fullscreen__close";
+  closeButton.type = "button";
+  closeButton.textContent = "Close";
+  root.append(closeButton);
+
+  const stage = document.createElement("div");
+  stage.className = "projector-fullscreen__stage";
+  root.append(stage);
+
+  document.body.append(root);
+  return { root, closeButton, stage };
+}
+
+function isProjectorFullscreenOpen() {
+  return Boolean(projectorPrimaryDisplay?.isDetachedToFullscreen);
+}
+
+function postProjectorIframeCommand(iframe, func, args = []) {
+  const contentWindow = iframe?.contentWindow;
+  if (!contentWindow) {
+    return;
+  }
+
+  contentWindow.postMessage(
+    JSON.stringify({
+      event: "command",
+      func,
+      args,
+    }),
+    "https://www.youtube.com",
+  );
+}
+
+function postProjectorYoutubeCommand(display, func, args = []) {
+  postProjectorIframeCommand(display?.cssIframe, func, args);
+}
+
+function syncProjectorFullscreenState() {
+  const display = projectorPrimaryDisplay;
+  const shell = display?.cssShell;
+  const iframe = display?.cssIframe;
+  if (!display || !shell || !iframe) {
+    return;
+  }
+
+  const fullscreenElement = document.fullscreenElement;
+  const isFullscreen = fullscreenElement === shell || fullscreenElement === iframe;
+  display.isDetachedToFullscreen = isFullscreen;
+  shell.classList.toggle("projector-youtube-shell--fullscreen", isFullscreen);
+  if (display.fullscreenCloseButton) {
+    display.fullscreenCloseButton.tabIndex = isFullscreen ? 0 : -1;
+    display.fullscreenCloseButton.setAttribute("aria-hidden", isFullscreen ? "false" : "true");
+  }
+  display.cssObject.visible = isFullscreen ? true : isProjectorDisplayVisibleFromCamera(display);
+}
+
+async function openProjectorFullscreen() {
+  const display = projectorPrimaryDisplay;
+  const shell = display?.cssShell;
+  const iframe = display?.cssIframe;
+  if (!display || !shell || !iframe) {
+    return;
+  }
+  const currentSrc = display.cssIframe?.getAttribute("src")?.trim() ?? "";
+  if (!display.requestedVisible && !currentSrc) {
+    return;
+  }
+  if (display.isDetachedToFullscreen) {
+    return;
+  }
+
+  clearMovementState();
+  unlockPointer();
+  shell.classList.add("projector-youtube-shell--fullscreen");
+  display.cssObject.visible = true;
+
+  try {
+    if (document.fullscreenElement !== shell && shell.requestFullscreen) {
+      await shell.requestFullscreen();
+    }
+  } catch (error) {
+    shell.classList.remove("projector-youtube-shell--fullscreen");
+    display.cssObject.visible = isProjectorDisplayVisibleFromCamera(display);
+    console.warn("Projector fullscreen request was blocked", error);
+  } finally {
+    syncProjectorFullscreenState();
+  }
+}
+
+function closeProjectorFullscreen() {
+  if (!isProjectorFullscreenOpen()) {
+    return;
+  }
+
+  if (document.fullscreenElement && document.exitFullscreen) {
+    void document.exitFullscreen().catch(() => {});
+    return;
+  }
+  syncProjectorFullscreenState();
+}
+
+function registerProjectorInteraction(mesh, {
+  promptEyebrow = "Projector",
+  promptTitle = "Press E for Fullscreen",
+  lines = ["Open the current stream full screen."],
+  promptRadius = 3.2,
+  promptOffsetY = 0.28,
+} = {}) {
+  if (!mesh) {
+    return;
+  }
+
+  const interactionPoint = new THREE.Vector3();
+  mesh.getWorldPosition(interactionPoint);
+  interactiveProjectors.push({
+    promptEyebrow,
+    promptTitle,
+    lines,
+    promptRadius,
+    interactionPoint,
+    promptAnchor: mesh,
+    promptOffsetY,
+  });
 }
 
 function hideProjectorYoutubeOverlay() {
@@ -1277,21 +1492,6 @@ function showProjectorYoutubeOverlay(videoId = "", options = {}) {
   updateProjectorDisplayVisibility();
   updateProjectorAudioZone();
   syncProjectorYoutubeAudioState();
-}
-
-function postProjectorYoutubeCommand(display, func, args = []) {
-  if (!display?.cssIframe?.contentWindow) {
-    return;
-  }
-
-  display.cssIframe.contentWindow.postMessage(
-    JSON.stringify({
-      event: "command",
-      func,
-      args,
-    }),
-    "https://www.youtube.com",
-  );
 }
 
 function syncProjectorDisplayPlayback(display, allowAudio = false) {
@@ -1427,6 +1627,9 @@ function updateProjectorDisplayVisibility() {
   const displays = [projectorPrimaryDisplay, ...projectorMirroredDisplays];
   displays.forEach((display) => {
     if (!display?.cssObject) {
+      return;
+    }
+    if (display.isDetachedToFullscreen) {
       return;
     }
     // Live status is shared, but whether a screen is visible is always decided locally.
@@ -1664,14 +1867,7 @@ async function refreshProjectorStatus() {
     })
     .then(async (payload) => {
       const nextStatus = normalizeProjectorStatusPayload(payload);
-      if (!nextStatus?.live) {
-        const replayVideoId = loadStoredProjectorVideoId();
-        if (replayVideoId) {
-          showProjectorYoutubeOverlay(replayVideoId, { replay: true });
-          applyProjectorFallbackTexture();
-          return;
-        }
-
+      if (!nextStatus) {
         hideProjectorYoutubeOverlay();
         applyProjectorFallbackTexture();
         return;
@@ -1679,19 +1875,52 @@ async function refreshProjectorStatus() {
 
       if (nextStatus.videoId) {
         rememberProjectorVideoId(nextStatus.videoId);
+        showProjectorYoutubeOverlay(
+          nextStatus.videoId,
+          nextStatus.replay
+            ? {
+                replay: true,
+                startAt: getProjectorReplayStartAt(nextStatus),
+              }
+            : {},
+        );
+        applyProjectorFallbackTexture();
+        return;
       }
-      showProjectorYoutubeOverlay(nextStatus.videoId);
+
+      if (nextStatus.live) {
+        showProjectorYoutubeOverlay();
+        applyProjectorFallbackTexture();
+        return;
+      }
+
+      if (nextStatus.error) {
+        const replayVideoId = loadStoredProjectorVideoId();
+        if (replayVideoId) {
+          showProjectorYoutubeOverlay(replayVideoId, {
+            replay: true,
+            startAt: PROJECTOR_REPLAY_START_SECONDS,
+          });
+          applyProjectorFallbackTexture();
+          return;
+        }
+      }
+
+      hideProjectorYoutubeOverlay();
       applyProjectorFallbackTexture();
     })
     .catch((error) => {
       console.error("Unable to refresh projector status", error);
       const replayVideoId = loadStoredProjectorVideoId();
       if (replayVideoId) {
-        showProjectorYoutubeOverlay(replayVideoId, { replay: true });
+        showProjectorYoutubeOverlay(replayVideoId, {
+          replay: true,
+          startAt: PROJECTOR_REPLAY_START_SECONDS,
+        });
         applyProjectorFallbackTexture();
         return;
       }
-      showProjectorYoutubeOverlay();
+      hideProjectorYoutubeOverlay();
       applyProjectorFallbackTexture();
     })
     .finally(() => {
@@ -3982,6 +4211,8 @@ const startBgMusicOnInteraction = () => {
 canvas.addEventListener("click", startBgMusicOnInteraction);
 document.addEventListener("keydown", startBgMusicOnInteraction);
 canvas.addEventListener("click", maybeLockWalkthrough);
+projectorFullscreenCloseButton.addEventListener("click", closeProjectorFullscreen);
+document.addEventListener("fullscreenchange", syncProjectorFullscreenState);
 document.addEventListener("pointerlockchange", onPointerLockChange);
 document.addEventListener("mousemove", onPointerMove);
 window.addEventListener("resize", onResize);
@@ -11241,28 +11472,8 @@ function addP3aStorageShelf() {
     const isOccupied = circleTableChairSeats.some(
       ([x, z]) => Math.abs(chairCenter[0] - x) < 0.01 && Math.abs(chairCenter[1] - z) < 0.01,
     );
-    const isEmptyCircleTableChair =
-      !isOccupied &&
-      Math.abs(chairCenter[0] - 6.5) < 0.01 &&
-      Math.abs(chairCenter[1] - 32.7) < 0.01;
-    let breakingNewsAudio = null;
     addOversizedSwivelChair(chairCenter, chairRotation, {
       registerAsSeat: !isOccupied,
-      onSit: isEmptyCircleTableChair
-        ? () => {
-            breakingNewsAudio = new Audio(new URL("./BreakingNews_NEW.mp3", import.meta.url).href);
-            breakingNewsAudio.play().catch(() => {});
-          }
-        : undefined,
-      onStand: isEmptyCircleTableChair
-        ? () => {
-            if (breakingNewsAudio) {
-              breakingNewsAudio.pause();
-              breakingNewsAudio.currentTime = 0;
-              breakingNewsAudio = null;
-            }
-          }
-        : undefined,
     });
     if (isOccupied) {
       const towardTable = 0.08;
@@ -15137,6 +15348,13 @@ function addHangarRearShelf(center, rotation = 0) {
 
   enableShadows(shelf);
   placePlanObject(shelf, center, 0, rotation, furnishingGroup);
+  registerProjectorInteraction(screenFace, {
+    promptEyebrow: "Projector",
+    promptTitle: "Press E for Fullscreen",
+    lines: ["Open the current stream full screen."],
+    promptRadius: 3.4,
+    promptOffsetY: 0.1,
+  });
   pushPlanRectCollider(center, width, depth, rotation, PLAYER_RADIUS * 0.06);
 }
 
@@ -16817,6 +17035,12 @@ function getInteractionDistanceLimit(type, target) {
   return type === "npc" ? target.promptRadius : target.promptRadius ?? 1.8;
 }
 
+function canOpenProjectorFullscreen() {
+  const display = projectorPrimaryDisplay;
+  const currentSrc = display?.cssIframe?.getAttribute("src")?.trim() ?? "";
+  return Boolean(display?.cssShell && (display.requestedVisible || currentSrc));
+}
+
 function getNearestInteraction() {
   return [
     ...interactiveDoors.map((door) => ({
@@ -16846,8 +17070,16 @@ function getNearestInteraction() {
         target: goalpost,
         distance: goalpost.interactionPoint.distanceTo(playerState.position),
       })),
+    ...interactiveProjectors.map((projector) => ({
+      type: "projector",
+      target: projector,
+      distance: projector.interactionPoint.distanceTo(playerState.position),
+    })),
   ]
     .filter(({ distance, target, type }) => {
+      if (type === "projector" && !canOpenProjectorFullscreen()) {
+        return false;
+      }
       if (type === "seat" && target.occupiedByClientId && target.occupiedByClientId !== multiplayerClientId) {
         return false;
       }
@@ -16886,7 +17118,7 @@ function positionInteractionPrompt(target) {
 }
 
 function updateInteractionPrompt(elapsedTime) {
-  if (state.mode !== "walk") {
+  if (state.mode !== "walk" || isProjectorFullscreenOpen()) {
     hideInteractionPrompt();
     return;
   }
@@ -16959,6 +17191,11 @@ function updateInteractionPrompt(elapsedTime) {
     interactionPromptEyebrow.textContent = "Goal Post";
     interactionPromptTitle.textContent = "Press E to Pick Up";
     interactionPromptLine.textContent = "Carry it to a new spot.";
+    setInteractionPromptCooldown(false);
+  } else if (nearestInteraction.type === "projector") {
+    interactionPromptEyebrow.textContent = nearestInteraction.target.promptEyebrow;
+    interactionPromptTitle.textContent = nearestInteraction.target.promptTitle;
+    interactionPromptLine.textContent = nearestInteraction.target.lines[0] ?? "Open the current stream full screen.";
     setInteractionPromptCooldown(false);
   } else {
     interactionPromptEyebrow.textContent = nearestInteraction.target.promptEyebrow;
@@ -17294,6 +17531,11 @@ function toggleNearestInteraction() {
 
   if (nearestInteraction.type === "goalpost") {
     startCarryingGoalpost(nearestInteraction.target);
+    return;
+  }
+
+  if (nearestInteraction.type === "projector") {
+    void openProjectorFullscreen();
     return;
   }
 
@@ -19026,7 +19268,13 @@ function onPointerLockChange() {
 }
 
 function onPointerMove(event) {
-  if (state.mode !== "walk" || !isPointerLocked || !isSubscriberSessionReady() || isSessionGateOpen()) {
+  if (
+    state.mode !== "walk" ||
+    !isPointerLocked ||
+    !isSubscriberSessionReady() ||
+    isSessionGateOpen() ||
+    isProjectorFullscreenOpen()
+  ) {
     return;
   }
 
@@ -19044,13 +19292,22 @@ function maybeLockWalkthrough() {
     !isPointerLocked &&
     isSubscriberSessionReady() &&
     !isSessionGateOpen() &&
-    !isSuggestionPanelOpen
+    !isSuggestionPanelOpen &&
+    !isProjectorFullscreenOpen()
   ) {
     canvas.requestPointerLock();
   }
 }
 
 function onKeyDown(event) {
+  if (isProjectorFullscreenOpen()) {
+    if (event.code === "Escape" || event.code === "KeyE") {
+      event.preventDefault();
+      closeProjectorFullscreen();
+    }
+    return;
+  }
+
   if (isSuggestionPanelOpen) {
     if (event.code === "Escape") {
       event.preventDefault();
@@ -19180,6 +19437,10 @@ function onKeyDown(event) {
 }
 
 function onKeyUp(event) {
+  if (isProjectorFullscreenOpen()) {
+    return;
+  }
+
   if (isSuggestionPanelOpen) {
     return;
   }

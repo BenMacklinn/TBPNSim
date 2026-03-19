@@ -21,22 +21,23 @@ Then open `http://localhost:4173`.
 - Chat NPCs including Tyler at the east desk
 - Seated characters at double-layer desks and stage area
 - Hangar stage with truss lighting, monitors, and round table
-- Real projector screen support for a live TBPN stream via `THREE.VideoTexture`
+- Real projector screen support for a live or replaying TBPN YouTube stream
 
 ## Projector Live Stream
 
-The hangar projector can now swap from the baked `projector-screen.png` image to a real live stream when the Supabase edge function at `tbpn-live-status` reports:
+The hangar projector can now swap from the baked `projector-screen.png` image to a YouTube-backed live or replay stream when the Supabase edge function at `tbpn-live-status` reports:
 
 ```json
 {
-  "live": true,
-  "playbackUrl": "https://your-stream-origin.example.com/tbpn/index.m3u8",
-  "mimeType": "application/vnd.apple.mpegurl"
+  "mode": "live",
+  "videoId": "youtube-video-id",
+  "replay": false
 }
 ```
 
 Important:
 
-- The projector needs a direct video playback URL that the browser can play, such as HLS or MP4.
-- A normal YouTube watch URL or YouTube iframe URL will not work as a three.js video texture.
-- The playback origin must allow cross-origin video requests from your site.
+- The projector is now driven by YouTube state, not by a direct HLS stream URL.
+- While a livestream is active, the projector shows the live YouTube video.
+- When the livestream ends, the projector keeps replaying the previous VOD until the new archive is ready, then it switches to the newest completed VOD.
+- The edge function caches projector state in Supabase so every browser does not hit the YouTube API independently.

@@ -103,3 +103,72 @@ on public.chat_messages
 for insert
 to authenticated
 with check ((select auth.uid()) = profile_id);
+
+create table if not exists public.projector_state (
+  id text primary key check (id = 'main'),
+  mode text not null default 'offline' check (mode in ('offline', 'live', 'replay', 'archive_pending')),
+  live_video_id text not null default '',
+  replay_video_id text not null default '',
+  replay_clock_video_id text not null default '',
+  replay_started_at timestamptz,
+  replay_duration_seconds integer,
+  pending_archive_video_id text not null default '',
+  uploads_playlist_id text not null default '',
+  check_lease_expires_at timestamptz,
+  last_live_check_at timestamptz,
+  last_archive_check_at timestamptz,
+  last_source text not null default '',
+  last_error text not null default '',
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+alter table public.projector_state
+  add column if not exists replay_clock_video_id text not null default '';
+
+alter table public.projector_state
+  add column if not exists replay_started_at timestamptz;
+
+alter table public.projector_state
+  add column if not exists replay_duration_seconds integer;
+
+insert into public.projector_state (id)
+values ('main')
+on conflict (id) do nothing;
+
+drop trigger if exists projector_state_set_updated_at on public.projector_state;
+create trigger projector_state_set_updated_at
+before update on public.projector_state
+for each row
+execute function public.set_updated_at();
+
+alter table public.projector_state enable row level security;
+
+create or replace function public.claim_projector_refresh(lease_seconds integer default 20)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  rows_updated integer := 0;
+begin
+  insert into public.projector_state (id)
+  values ('main')
+  on conflict (id) do nothing;
+
+  update public.projector_state
+  set check_lease_expires_at = timezone('utc', now()) + make_interval(secs => greatest(lease_seconds, 5))
+  where id = 'main'
+    and (
+      check_lease_expires_at is null
+      or check_lease_expires_at < timezone('utc', now())
+    );
+
+  get diagnostics rows_updated = ROW_COUNT;
+  return rows_updated > 0;
+end;
+$$;
+
+revoke all on function public.claim_projector_refresh(integer) from public;
+grant execute on function public.claim_projector_refresh(integer) to service_role;
