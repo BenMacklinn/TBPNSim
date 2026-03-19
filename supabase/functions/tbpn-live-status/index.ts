@@ -3,7 +3,6 @@ declare const Deno: {
   serve: (handler: (req: Request) => Promise<Response> | Response) => void;
 };
 
-// @ts-expect-error - Deno ESM import
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2?target=deno";
 
 type ProjectorMode = "offline" | "live" | "replay" | "archive_pending";
@@ -60,6 +59,12 @@ type YoutubePlaylistItemsResponse = {
 
 type YoutubeVideosResponse = {
   items?: Array<{
+    snippet?: {
+      liveBroadcastContent?: string;
+    };
+    liveStreamingDetails?: {
+      actualEndTime?: string;
+    };
     contentDetails?: {
       duration?: string;
     };
@@ -172,17 +177,12 @@ function shouldRunLiveCheck(state: ProjectorStateRow, nowMs: number, minutesSinc
 
 function shouldRunArchiveCheck(state: ProjectorStateRow, nowMs: number) {
   const replayVideoId = trimString(state.replay_video_id);
-  const pendingArchiveVideoId = trimString(state.pending_archive_video_id);
 
   if (!replayVideoId) {
     return nowMs - parseTimestamp(state.last_archive_check_at) >= REPLAY_BOOTSTRAP_CHECK_INTERVAL_MS;
   }
 
-  if (!pendingArchiveVideoId) {
-    return false;
-  }
-
-  return nowMs - parseTimestamp(state.last_archive_check_at) >= ARCHIVE_CHECK_INTERVAL_MS;
+  return false;
 }
 
 function needsReplayClockRefresh(state: ProjectorStateRow) {
@@ -401,7 +401,13 @@ async function fetchActiveLiveVideoId(youtubeApiKey: string, channelId: string) 
 
   const payload = await fetchYoutubeJson<YoutubeSearchResponse>(searchUrl);
   const item = Array.isArray(payload.items) ? payload.items[0] : null;
-  return trimString(item?.id?.videoId);
+  const videoId = trimString(item?.id?.videoId);
+  if (!videoId) {
+    return "";
+  }
+
+  const lifecycle = await fetchVideoLifecycleState(youtubeApiKey, videoId);
+  return lifecycle.isLive ? videoId : "";
 }
 
 async function fetchLatestCompletedBroadcastVideoId(youtubeApiKey: string, channelId: string) {
@@ -455,6 +461,23 @@ async function fetchVideoDurationSeconds(youtubeApiKey: string, videoId: string)
   const payload = await fetchYoutubeJson<YoutubeVideosResponse>(videosUrl);
   const item = Array.isArray(payload.items) ? payload.items[0] : null;
   return parseIso8601DurationSeconds(trimString(item?.contentDetails?.duration));
+}
+
+async function fetchVideoLifecycleState(youtubeApiKey: string, videoId: string) {
+  const videosUrl = new URL("https://www.googleapis.com/youtube/v3/videos");
+  videosUrl.searchParams.set("part", "snippet,liveStreamingDetails");
+  videosUrl.searchParams.set("id", videoId);
+  videosUrl.searchParams.set("key", youtubeApiKey);
+
+  const payload = await fetchYoutubeJson<YoutubeVideosResponse>(videosUrl);
+  const item = Array.isArray(payload.items) ? payload.items[0] : null;
+  const liveBroadcastContent = trimString(item?.snippet?.liveBroadcastContent).toLowerCase();
+  const actualEndTime = trimString(item?.liveStreamingDetails?.actualEndTime);
+
+  return {
+    isLive: liveBroadcastContent === "live" && !actualEndTime,
+    actualEndTime,
+  };
 }
 
 async function synchronizeReplayClock(
@@ -518,23 +541,36 @@ async function refreshProjectorState(params: {
     nextState.last_live_check_at = isoNow();
     updated = true;
     try {
-      const liveVideoId = await fetchActiveLiveVideoId(youtubeApiKey, channelId);
       nextState.last_error = "";
+      const currentLiveVideoId = trimString(nextState.live_video_id);
 
-      if (liveVideoId) {
-        nextState.mode = "live";
-        nextState.live_video_id = liveVideoId;
-        nextState.pending_archive_video_id = "";
-        nextState.last_source = "youtube.live_search";
-      } else if (trimString(nextState.live_video_id)) {
-        nextState.pending_archive_video_id = trimString(nextState.live_video_id);
-        nextState.live_video_id = "";
-        nextState.mode = trimString(nextState.replay_video_id) ? "archive_pending" : "offline";
-        nextState.last_source = "youtube.live_ended";
-      } else if (trimString(nextState.replay_video_id)) {
-        nextState.mode = trimString(nextState.pending_archive_video_id) ? "archive_pending" : "replay";
+      if (currentLiveVideoId) {
+        const currentLifecycle = await fetchVideoLifecycleState(youtubeApiKey, currentLiveVideoId);
+        if (currentLifecycle.isLive) {
+          nextState.mode = "live";
+          nextState.live_video_id = currentLiveVideoId;
+          nextState.last_source = "youtube.live_verify";
+        } else {
+          nextState.replay_video_id = currentLiveVideoId;
+          nextState.live_video_id = "";
+          nextState.pending_archive_video_id = "";
+          nextState.mode = "replay";
+          nextState.last_source = currentLifecycle.actualEndTime
+            ? "youtube.live_ended_to_replay"
+            : "youtube.live_no_longer_active";
+        }
       } else {
-        nextState.mode = "offline";
+        const liveVideoId = await fetchActiveLiveVideoId(youtubeApiKey, channelId);
+        if (liveVideoId) {
+          nextState.mode = "live";
+          nextState.live_video_id = liveVideoId;
+          nextState.pending_archive_video_id = "";
+          nextState.last_source = "youtube.live_search";
+        } else if (trimString(nextState.replay_video_id)) {
+          nextState.mode = "replay";
+        } else {
+          nextState.mode = "offline";
+        }
       }
     } catch (error) {
       nextState.last_error = error instanceof Error ? error.message : String(error);
@@ -546,30 +582,11 @@ async function refreshProjectorState(params: {
     nextState.last_archive_check_at = isoNow();
     updated = true;
     try {
-      if (!trimString(nextState.uploads_playlist_id)) {
-        nextState.uploads_playlist_id = await fetchUploadsPlaylistId(youtubeApiKey, channelId);
-      }
-
-      const pendingArchiveVideoId = trimString(nextState.pending_archive_video_id);
-      if (pendingArchiveVideoId && trimString(nextState.uploads_playlist_id)) {
-        const recentUploadVideoIds = await fetchRecentUploadVideoIds(
-          youtubeApiKey,
-          nextState.uploads_playlist_id,
-        );
-
-        if (recentUploadVideoIds.includes(pendingArchiveVideoId)) {
-          nextState.replay_video_id = pendingArchiveVideoId;
-          nextState.pending_archive_video_id = "";
-          nextState.mode = "replay";
-          nextState.last_source = "youtube.archive_ready";
-          nextState.last_error = "";
-        } else if (trimString(nextState.replay_video_id)) {
-          nextState.mode = "archive_pending";
-        }
-      } else if (!trimString(nextState.replay_video_id)) {
+      if (!trimString(nextState.replay_video_id)) {
         const replayVideoId = await fetchLatestCompletedBroadcastVideoId(youtubeApiKey, channelId);
         if (replayVideoId) {
           nextState.replay_video_id = replayVideoId;
+          nextState.pending_archive_video_id = "";
           nextState.mode = nextState.mode === "live" ? "live" : "replay";
           nextState.last_source = "youtube.completed_bootstrap";
           nextState.last_error = "";
@@ -583,6 +600,10 @@ async function refreshProjectorState(params: {
 
   if (nextState.mode !== "live") {
     nextState.live_video_id = "";
+  }
+
+  if (nextState.mode !== "live" && trimString(nextState.replay_video_id)) {
+    nextState.pending_archive_video_id = "";
   }
 
   if (needsReplayClockRefresh(nextState)) {
@@ -600,11 +621,13 @@ async function refreshProjectorState(params: {
     }
   }
 
-  if (nextState.mode !== "live" && trimString(nextState.replay_video_id) && !trimString(nextState.pending_archive_video_id)) {
+  if (nextState.mode !== "live" && trimString(nextState.replay_video_id)) {
+    nextState.pending_archive_video_id = "";
     nextState.mode = "replay";
   }
 
-  if (!trimString(nextState.replay_video_id) && !trimString(nextState.pending_archive_video_id) && nextState.mode !== "live") {
+  if (!trimString(nextState.replay_video_id) && nextState.mode !== "live") {
+    nextState.pending_archive_video_id = "";
     nextState.mode = "offline";
   }
 

@@ -1151,16 +1151,7 @@ function getProjectorReplayStartAt(status) {
     typeof status?.replayDurationSeconds === "number" && Number.isFinite(status.replayDurationSeconds)
       ? Math.max(0, Math.floor(status.replayDurationSeconds))
       : 0;
-  const baselineStartAt =
-    durationSeconds > 1 ? Math.min(PROJECTOR_REPLAY_START_SECONDS, durationSeconds - 1) : 0;
-  const startedAtMs = parseProjectorTimestampMs(status?.replayStartedAt);
-  if (!startedAtMs || durationSeconds <= baselineStartAt + 1) {
-    return baselineStartAt;
-  }
-
-  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
-  const replayWindowSeconds = Math.max(1, durationSeconds - baselineStartAt);
-  return baselineStartAt + (elapsedSeconds % replayWindowSeconds);
+  return durationSeconds > 1 ? Math.min(PROJECTOR_REPLAY_START_SECONDS, durationSeconds - 1) : 0;
 }
 
 function loadStoredProjectorVideoId() {
@@ -1231,6 +1222,11 @@ function createProjectorYoutubeDisplay(parent, mesh, width, height, title, front
   shell.style.width = `${PROJECTOR_YOUTUBE_EMBED_WIDTH}px`;
   shell.style.height = `${PROJECTOR_YOUTUBE_EMBED_HEIGHT}px`;
 
+  const modeBadge = document.createElement("div");
+  modeBadge.className = "projector-youtube-mode projector-youtube-mode--hidden";
+  modeBadge.setAttribute("aria-hidden", "true");
+  shell.append(modeBadge);
+
   const iframe = document.createElement("iframe");
   iframe.className = "projector-youtube-frame";
   iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
@@ -1268,6 +1264,7 @@ function createProjectorYoutubeDisplay(parent, mesh, width, height, title, front
     cssObject,
     cssShell: shell,
     cssIframe: iframe,
+    modeBadge,
     fullscreenCloseButton,
     youtubeVideoId: "",
     youtubeOptions: { replay: false, startAt: 0 },
@@ -1337,6 +1334,11 @@ function hideProjectorDisplayOverlay(display) {
   display.requestedVisible = false;
   display.cssObject.visible = false;
   display.cssIframe.removeAttribute("src");
+  if (display.modeBadge) {
+    display.modeBadge.textContent = "";
+    display.modeBadge.classList.add("projector-youtube-mode--hidden");
+    display.modeBadge.classList.remove("projector-youtube-mode--live", "projector-youtube-mode--replay");
+  }
 }
 
 function showProjectorDisplayOverlay(display, videoId = "", options = {}) {
@@ -1352,6 +1354,7 @@ function showProjectorDisplayOverlay(display, videoId = "", options = {}) {
   const shouldReload =
     display.youtubeVideoId !== nextVideoId ||
     Boolean(display.youtubeOptions?.replay) !== nextReplay ||
+    display.youtubeOptions?.startAt !== nextStartAt ||
     !hasCurrentEmbed;
   if (shouldReload) {
     display.cssIframe.src = buildProjectorYoutubeEmbedUrl(nextVideoId, {
@@ -1362,6 +1365,12 @@ function showProjectorDisplayOverlay(display, videoId = "", options = {}) {
     display.currentTime = 0;
   }
   display.youtubeOptions = { replay: nextReplay, startAt: nextStartAt };
+  if (display.modeBadge) {
+    display.modeBadge.textContent = nextReplay ? "REPLAY" : "LIVE";
+    display.modeBadge.classList.remove("projector-youtube-mode--hidden");
+    display.modeBadge.classList.toggle("projector-youtube-mode--live", !nextReplay);
+    display.modeBadge.classList.toggle("projector-youtube-mode--replay", nextReplay);
+  }
 
   display.requestedVisible = true;
   display.cssObject.visible = isProjectorDisplayVisibleFromCamera(display);
