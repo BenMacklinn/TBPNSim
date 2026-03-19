@@ -1729,7 +1729,7 @@ function applyProjectorFallbackTexture() {
   projectorStreamMode = "fallback";
   projectorScreenMaterial.map = projectorFallbackTexture;
   projectorScreenMaterial.emissiveMap = null;
-  projectorScreenMaterial.emissiveIntensity = 0.16;
+  projectorScreenMaterial.emissiveIntensity = 0;
   projectorScreenMaterial.needsUpdate = true;
   projectorMirroredDisplays.forEach((display) => {
     if (!display.material || !display.fallbackTexture) {
@@ -1737,7 +1737,7 @@ function applyProjectorFallbackTexture() {
     }
     display.material.map = display.fallbackTexture;
     display.material.emissiveMap = null;
-    display.material.emissiveIntensity = 0.16;
+    display.material.emissiveIntensity = 0;
     display.material.needsUpdate = true;
   });
 }
@@ -1856,7 +1856,7 @@ async function applyProjectorPlayback(playbackUrl, mimeType = "") {
   projectorStreamMode = "live";
   projectorScreenMaterial.map = videoTexture;
   projectorScreenMaterial.emissiveMap = videoTexture;
-  projectorScreenMaterial.emissiveIntensity = 0.28;
+  projectorScreenMaterial.emissiveIntensity = 0;
   projectorScreenMaterial.needsUpdate = true;
   projectorMirroredDisplays.forEach((display) => {
     if (!display.material) {
@@ -1864,7 +1864,7 @@ async function applyProjectorPlayback(playbackUrl, mimeType = "") {
     }
     display.material.map = videoTexture;
     display.material.emissiveMap = videoTexture;
-    display.material.emissiveIntensity = 0.28;
+    display.material.emissiveIntensity = 0;
     display.material.needsUpdate = true;
   });
 }
@@ -15074,9 +15074,9 @@ function addHangarRearShelf(center, rotation = 0) {
   projectorTexture.colorSpace = THREE.SRGBColorSpace;
   projectorTexture.center.set(0.5, 0.5);
   const screenMaterial = new THREE.MeshStandardMaterial({
-    color: "#f2f2ee",
-    emissive: "#d9deef",
-    emissiveIntensity: 0.16,
+    color: "#ffffff",
+    emissive: "#000000",
+    emissiveIntensity: 0,
     roughness: 0.26,
     metalness: 0.02,
     map: projectorTexture,
