@@ -864,6 +864,7 @@ const cameraCollisionRaycaster = new THREE.Raycaster();
 cameraCollisionRaycaster.layers.enable(HANGAR_LIGHTING_LAYER);
 const projectorVisibilityRaycaster = new THREE.Raycaster();
 const goalpostPlacementRaycaster = new THREE.Raycaster();
+const basketballObstacleRaycaster = new THREE.Raycaster();
 const goalpostPlacementPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const cameraLookTarget = new THREE.Vector3();
 const desiredCameraPosition = new THREE.Vector3();
@@ -905,6 +906,10 @@ const basketballLeftHandWorld = new THREE.Vector3();
 const basketballRightContactWorld = new THREE.Vector3();
 const basketballLeftContactWorld = new THREE.Vector3();
 const basketballCarryDelta = new THREE.Vector3();
+const basketballObstacleDirection = new THREE.Vector3();
+const basketballObstacleNormal = new THREE.Vector3();
+const basketballObstacleBlockPosition = new THREE.Vector3();
+const basketballObstacleCenter = new THREE.Vector3();
 const basketballShotPreviousPosition = new THREE.Vector3();
 const basketballShotPosition = new THREE.Vector3();
 const basketballShotMidpoint = new THREE.Vector3();
@@ -13736,6 +13741,9 @@ function addHangarBasketballHoop() {
   }
 
   enableShadows(hoop);
+  hoop.traverse((child) => {
+    child.userData.ignoreBasketballShotCollision = true;
+  });
   placePlanObject(hoop, hoopCenter, 0, Math.PI / 2, furnishingGroup);
   pushPlanRectCollider(hoopCenter, 1.06, 0.72, Math.PI / 2, PLAYER_RADIUS * 0.08);
   hangarBasketballHoop = {
@@ -16575,6 +16583,55 @@ function getBasketballShotBlocker(basketball, fromPosition, toPosition) {
   );
 }
 
+function getBasketballObstacleHit(basketball, fromPosition, toPosition) {
+  if (!basketball || !fromPosition || !toPosition) {
+    return null;
+  }
+
+  basketballObstacleDirection.copy(toPosition).sub(fromPosition);
+  const distance = basketballObstacleDirection.length();
+  if (distance <= 0.0001) {
+    return null;
+  }
+
+  basketballObstacleDirection.divideScalar(distance);
+  basketballObstacleRaycaster.set(fromPosition, basketballObstacleDirection);
+  basketballObstacleRaycaster.far = distance + TOY_BASKETBALL_RADIUS * 0.5;
+
+  const hit = basketballObstacleRaycaster
+    .intersectObjects([furnishingGroup], true)
+    .find(({ object, distance: hitDistance }) =>
+      object.visible &&
+      hitDistance >= 0 &&
+      !object.userData.ignoreBasketballShotCollision &&
+      !isObjectWithinRoot(object, basketball.object),
+    );
+
+  if (!hit) {
+    return null;
+  }
+
+  if (hit.face?.normal) {
+    basketballObstacleNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld).normalize();
+  } else {
+    basketballObstacleNormal.copy(basketballObstacleDirection).multiplyScalar(-1);
+  }
+
+  basketballObstacleBlockPosition
+    .copy(hit.point)
+    .addScaledVector(basketballObstacleNormal, TOY_BASKETBALL_RADIUS * 0.88);
+  basketballObstacleCenter
+    .copy(hit.point)
+    .addScaledVector(basketballObstacleNormal, -TOY_BASKETBALL_RADIUS * 0.42);
+
+  return {
+    blockPosition: basketballObstacleBlockPosition.clone(),
+    center: basketballObstacleCenter.clone(),
+    clientId: "item",
+    object: hit.object,
+  };
+}
+
 function startBasketballBlockedFlight(
   basketball,
   blockPosition,
@@ -16726,13 +16783,25 @@ function updateBasketballFlight(basketball) {
     basketball.flight.kind === "shot" &&
     basketball.flight.authoritativeClientId === multiplayerClientId
   ) {
-    const blocker = getBasketballShotBlocker(
+    const playerBlocker = getBasketballShotBlocker(
       basketball,
       basketballShotPreviousPosition,
       basketballShotPosition,
     );
-    if (blocker) {
-      startBasketballBlockedFlight(basketball, basketballShotPosition.clone(), blocker, {
+    if (playerBlocker) {
+      startBasketballBlockedFlight(basketball, basketballShotPosition.clone(), playerBlocker, {
+        shotId: basketball.flight.shotId,
+      });
+      return;
+    }
+
+    const obstacleHit = getBasketballObstacleHit(
+      basketball,
+      basketballShotPreviousPosition,
+      basketballShotPosition,
+    );
+    if (obstacleHit) {
+      startBasketballBlockedFlight(basketball, obstacleHit.blockPosition, obstacleHit, {
         shotId: basketball.flight.shotId,
       });
       return;
