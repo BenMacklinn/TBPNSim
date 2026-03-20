@@ -952,7 +952,7 @@ const clock = new THREE.Clock();
 const footstepState = { distance: 0, stride: 0.55 };
 let footstepAudioContext = null;
 let doorAudioContext = null;
-let basketballScoreAudioContext = null;
+let basketballScoreAudio = null;
 
 let bgMusic = null;
 let bgMusicMuted = false;
@@ -2458,6 +2458,20 @@ function getLocalMultiplayerPose() {
   return "idle";
 }
 
+function getLocallyAuthoredBasketball() {
+  if (state?.carriedBasketball) {
+    return state.carriedBasketball;
+  }
+
+  return (
+    interactiveBasketballs.find((basketball) =>
+      basketball.carrierClientId === multiplayerClientId ||
+      basketball.flight?.authoritativeClientId === multiplayerClientId ||
+      basketball.pendingResetAuthorityClientId === multiplayerClientId,
+    ) ?? null
+  );
+}
+
 function buildLocalMultiplayerPresenceSnapshot() {
   const carriedGoalpost = state.carriedGoalpost
     ? {
@@ -2481,6 +2495,9 @@ function buildLocalMultiplayerPresenceSnapshot() {
         rotationZ: roundMultiplayerNumber(state.carriedBasketball.object.rotation.z, 10000),
       }
     : null;
+  const sharedBasketball = getLocallyAuthoredBasketball()
+    ? serializeBasketballState(getLocallyAuthoredBasketball())
+    : null;
 
   return {
     presenceKey: multiplayerPresenceKey,
@@ -2501,6 +2518,7 @@ function buildLocalMultiplayerPresenceSnapshot() {
       : null,
     carriedGoalpost,
     carriedBasketball,
+    sharedBasketball,
     updatedAt: Date.now(),
   };
 }
@@ -2532,6 +2550,31 @@ function getMultiplayerPayloadSignature(payload) {
     payload.carriedBasketball?.rotationX ?? "",
     payload.carriedBasketball?.rotationY ?? "",
     payload.carriedBasketball?.rotationZ ?? "",
+    payload.sharedBasketball?.id ?? "",
+    payload.sharedBasketball?.carrierClientId ?? "",
+    payload.sharedBasketball?.isCarried ?? "",
+    payload.sharedBasketball?.isFlying ?? "",
+    payload.sharedBasketball?.x ?? "",
+    payload.sharedBasketball?.y ?? "",
+    payload.sharedBasketball?.z ?? "",
+    payload.sharedBasketball?.rotationX ?? "",
+    payload.sharedBasketball?.rotationY ?? "",
+    payload.sharedBasketball?.rotationZ ?? "",
+    payload.sharedBasketball?.pendingResetAt ?? "",
+    payload.sharedBasketball?.pendingResetAuthorityClientId ?? "",
+    payload.sharedBasketball?.updatedAt ?? "",
+    payload.sharedBasketball?.flight?.kind ?? "",
+    payload.sharedBasketball?.flight?.startedAt ?? "",
+    payload.sharedBasketball?.flight?.durationMs ?? "",
+    payload.sharedBasketball?.flight?.startX ?? "",
+    payload.sharedBasketball?.flight?.startY ?? "",
+    payload.sharedBasketball?.flight?.startZ ?? "",
+    payload.sharedBasketball?.flight?.controlX ?? "",
+    payload.sharedBasketball?.flight?.controlY ?? "",
+    payload.sharedBasketball?.flight?.controlZ ?? "",
+    payload.sharedBasketball?.flight?.endX ?? "",
+    payload.sharedBasketball?.flight?.endY ?? "",
+    payload.sharedBasketball?.flight?.endZ ?? "",
   ].join("|");
 }
 
@@ -2578,6 +2621,34 @@ function normalizeMultiplayerPresenceSnapshot(snapshot) {
           rotationZ: Number(snapshot.carriedBasketball.rotationZ),
         }
       : null;
+  const sharedBasketball =
+    snapshot.sharedBasketball && typeof snapshot.sharedBasketball === "object"
+      ? {
+          id: typeof snapshot.sharedBasketball.id === "string" ? snapshot.sharedBasketball.id : "",
+          carrierClientId:
+            typeof snapshot.sharedBasketball.carrierClientId === "string"
+              ? snapshot.sharedBasketball.carrierClientId
+              : "",
+          isCarried: Boolean(snapshot.sharedBasketball.isCarried),
+          isFlying: Boolean(snapshot.sharedBasketball.isFlying),
+          x: Number(snapshot.sharedBasketball.x),
+          y: Number(snapshot.sharedBasketball.y),
+          z: Number(snapshot.sharedBasketball.z),
+          rotationX: Number(snapshot.sharedBasketball.rotationX),
+          rotationY: Number(snapshot.sharedBasketball.rotationY),
+          rotationZ: Number(snapshot.sharedBasketball.rotationZ),
+          pendingResetAt: Number(snapshot.sharedBasketball.pendingResetAt),
+          pendingResetAuthorityClientId:
+            typeof snapshot.sharedBasketball.pendingResetAuthorityClientId === "string"
+              ? snapshot.sharedBasketball.pendingResetAuthorityClientId
+              : "",
+          updatedAt: Number(snapshot.sharedBasketball.updatedAt),
+          flight:
+            snapshot.sharedBasketball.flight && typeof snapshot.sharedBasketball.flight === "object"
+              ? { ...snapshot.sharedBasketball.flight }
+              : null,
+        }
+      : null;
 
   return {
     presenceKey: typeof snapshot.presenceKey === "string" ? snapshot.presenceKey : "",
@@ -2622,6 +2693,21 @@ function normalizeMultiplayerPresenceSnapshot(snapshot) {
       Number.isFinite(carriedBasketball.rotationY) &&
       Number.isFinite(carriedBasketball.rotationZ)
         ? carriedBasketball
+        : null,
+    sharedBasketball:
+      sharedBasketball &&
+      sharedBasketball.id &&
+      Number.isFinite(sharedBasketball.x) &&
+      Number.isFinite(sharedBasketball.y) &&
+      Number.isFinite(sharedBasketball.z) &&
+      Number.isFinite(sharedBasketball.rotationX) &&
+      Number.isFinite(sharedBasketball.rotationY) &&
+      Number.isFinite(sharedBasketball.rotationZ)
+        ? {
+            ...sharedBasketball,
+            pendingResetAt: Number.isFinite(sharedBasketball.pendingResetAt) ? sharedBasketball.pendingResetAt : 0,
+            updatedAt: Number.isFinite(sharedBasketball.updatedAt) ? sharedBasketball.updatedAt : 0,
+          }
         : null,
     updatedAt: Number.isFinite(Number(snapshot.updatedAt)) ? Number(snapshot.updatedAt) : 0,
   };
@@ -16352,49 +16438,18 @@ function dropCarriedBasketball(force = false, { broadcast = true, issuedAt = Dat
 }
 
 function playBasketballScoreSound() {
-  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContextCtor) {
-    return;
+  if (!basketballScoreAudio) {
+    basketballScoreAudio = new Audio(
+      new URL("./Cash Register (Kaching) - Sound Effect (HD) 4.mp3", import.meta.url).href,
+    );
+    basketballScoreAudio.preload = "auto";
   }
-
-  if (!basketballScoreAudioContext) {
-    basketballScoreAudioContext = new AudioContextCtor();
+  try {
+    basketballScoreAudio.currentTime = 0;
+  } catch {
+    // ignore seek errors before metadata loads
   }
-  if (basketballScoreAudioContext.state === "suspended") {
-    basketballScoreAudioContext.resume().catch(() => {});
-  }
-
-  const ctx = basketballScoreAudioContext;
-  const now = ctx.currentTime;
-  const notes = [
-    { offset: 0, frequency: 830, duration: 0.09, gain: 0.045 },
-    { offset: 0.09, frequency: 1240, duration: 0.14, gain: 0.06 },
-  ];
-
-  notes.forEach(({ offset, frequency, duration, gain }) => {
-    const osc = ctx.createOscillator();
-    osc.type = "triangle";
-    osc.frequency.setValueAtTime(frequency, now + offset);
-    osc.frequency.exponentialRampToValueAtTime(frequency * 1.08, now + offset + duration);
-
-    const shimmer = ctx.createOscillator();
-    shimmer.type = "square";
-    shimmer.frequency.setValueAtTime(frequency * 2, now + offset);
-
-    const noteGain = ctx.createGain();
-    noteGain.gain.setValueAtTime(0.0001, now + offset);
-    noteGain.gain.exponentialRampToValueAtTime(gain, now + offset + 0.012);
-    noteGain.gain.exponentialRampToValueAtTime(0.0001, now + offset + duration);
-
-    osc.connect(noteGain);
-    shimmer.connect(noteGain);
-    noteGain.connect(ctx.destination);
-
-    osc.start(now + offset);
-    shimmer.start(now + offset);
-    osc.stop(now + offset + duration + 0.02);
-    shimmer.stop(now + offset + duration + 0.02);
-  });
+  basketballScoreAudio.play().catch(() => {});
 }
 
 function getBasketballBlockers(shooterClientId = "") {
