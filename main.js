@@ -910,6 +910,11 @@ const basketballObstacleDirection = new THREE.Vector3();
 const basketballObstacleNormal = new THREE.Vector3();
 const basketballObstacleBlockPosition = new THREE.Vector3();
 const basketballObstacleCenter = new THREE.Vector3();
+const basketballObstacleRight = new THREE.Vector3();
+const basketballObstacleUp = new THREE.Vector3();
+const basketballObstacleOrigin = new THREE.Vector3();
+const basketballObstacleAxis = new THREE.Vector3();
+const basketballWorldUp = new THREE.Vector3(0, 1, 0);
 const basketballShotPreviousPosition = new THREE.Vector3();
 const basketballShotPosition = new THREE.Vector3();
 const basketballShotMidpoint = new THREE.Vector3();
@@ -16595,40 +16600,75 @@ function getBasketballObstacleHit(basketball, fromPosition, toPosition) {
   }
 
   basketballObstacleDirection.divideScalar(distance);
-  basketballObstacleRaycaster.set(fromPosition, basketballObstacleDirection);
-  basketballObstacleRaycaster.far = distance + TOY_BASKETBALL_RADIUS * 0.5;
+  basketballObstacleAxis.copy(basketballWorldUp);
+  if (Math.abs(basketballObstacleDirection.dot(basketballObstacleAxis)) > 0.96) {
+    basketballObstacleAxis.set(1, 0, 0);
+  }
+  basketballObstacleRight.crossVectors(basketballObstacleDirection, basketballObstacleAxis).normalize();
+  basketballObstacleUp.crossVectors(basketballObstacleRight, basketballObstacleDirection).normalize();
 
-  const hit = basketballObstacleRaycaster
-    .intersectObjects([furnishingGroup], true)
-    .find(({ object, distance: hitDistance }) =>
-      object.visible &&
-      hitDistance >= 0 &&
-      !object.userData.ignoreBasketballShotCollision &&
-      !isObjectWithinRoot(object, basketball.object),
-    );
+  let bestHit = null;
+  const sweepOffsets = [
+    [0, 0],
+    [0.85, 0],
+    [-0.85, 0],
+    [0, 0.85],
+    [0, -0.85],
+    [0.6, 0.6],
+    [-0.6, 0.6],
+    [0.6, -0.6],
+    [-0.6, -0.6],
+  ];
 
-  if (!hit) {
+  sweepOffsets.forEach(([rightOffset, upOffset]) => {
+    basketballObstacleOrigin
+      .copy(fromPosition)
+      .addScaledVector(basketballObstacleRight, rightOffset * TOY_BASKETBALL_RADIUS)
+      .addScaledVector(basketballObstacleUp, upOffset * TOY_BASKETBALL_RADIUS);
+
+    basketballObstacleRaycaster.set(basketballObstacleOrigin, basketballObstacleDirection);
+    basketballObstacleRaycaster.far = distance + TOY_BASKETBALL_RADIUS * 0.5;
+
+    const hit = basketballObstacleRaycaster
+      .intersectObjects([furnishingGroup], true)
+      .find(({ object, distance: hitDistance }) =>
+        object.visible &&
+        hitDistance >= 0 &&
+        !object.userData.ignoreBasketballShotCollision &&
+        !isObjectWithinRoot(object, basketball.object),
+      );
+
+    if (!hit) {
+      return;
+    }
+
+    if (!bestHit || hit.distance < bestHit.distance) {
+      bestHit = hit;
+    }
+  });
+
+  if (!bestHit) {
     return null;
   }
 
-  if (hit.face?.normal) {
-    basketballObstacleNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld).normalize();
+  if (bestHit.face?.normal) {
+    basketballObstacleNormal.copy(bestHit.face.normal).transformDirection(bestHit.object.matrixWorld).normalize();
   } else {
     basketballObstacleNormal.copy(basketballObstacleDirection).multiplyScalar(-1);
   }
 
   basketballObstacleBlockPosition
-    .copy(hit.point)
+    .copy(bestHit.point)
     .addScaledVector(basketballObstacleNormal, TOY_BASKETBALL_RADIUS * 0.88);
   basketballObstacleCenter
-    .copy(hit.point)
+    .copy(bestHit.point)
     .addScaledVector(basketballObstacleNormal, -TOY_BASKETBALL_RADIUS * 0.42);
 
   return {
     blockPosition: basketballObstacleBlockPosition.clone(),
     center: basketballObstacleCenter.clone(),
     clientId: "item",
-    object: hit.object,
+    object: bestHit.object,
   };
 }
 
