@@ -240,6 +240,25 @@ const GOALPOST_HOLD_VERTICAL_FIRST_PERSON = -1.24;
 const GOALPOST_HOLD_BASE_HEIGHT_THIRD_PERSON = 0.28;
 const GOALPOST_HOLD_TILT_X = -0.08;
 const GOALPOST_HOLD_TILT_Z = -0.16;
+const TOY_BASKETBALL_RADIUS = 0.16;
+const TOY_BASKETBALL_PICKUP_RADIUS = 1.85;
+const TOY_BASKETBALL_INTERACTION_HEIGHT = 0.34;
+const TOY_BASKETBALL_HOLD_FORWARD_FIRST_PERSON = 0.62;
+const TOY_BASKETBALL_HOLD_SIDE_FIRST_PERSON = 0.22;
+const TOY_BASKETBALL_HOLD_VERTICAL_FIRST_PERSON = -0.42;
+const TOY_BASKETBALL_HOLD_FORWARD_THIRD_PERSON = 0.46;
+const TOY_BASKETBALL_HOLD_SIDE_THIRD_PERSON = 0.28;
+const TOY_BASKETBALL_HOLD_HEIGHT_THIRD_PERSON = 1.1;
+const TOY_BASKETBALL_DROP_DISTANCE = 0.74;
+const TOY_BASKETBALL_SCORE_SETTLE_MS = 420;
+const TOY_BASKETBALL_BLOCK_DEFLECT_DISTANCE = 1.35;
+const TOY_BASKETBALL_BLOCK_TORSO_RADIUS = 0.34;
+const TOY_BASKETBALL_BLOCK_HEAD_RADIUS = 0.24;
+const TOY_BASKETBALL_SHOT_ARC_BASE = 1.45;
+const TOY_BASKETBALL_SHOT_ARC_DISTANCE_FACTOR = 0.16;
+const TOY_BASKETBALL_HEATSEEK_START = 0.16;
+const TOY_BASKETBALL_HEATSEEK_END = 0.94;
+const TOY_BASKETBALL_HEATSEEK_STRENGTH = 0.38;
 const MULTIPLAYER_TRACK_INTERVAL_MS = 120;
 const MULTIPLAYER_IDLE_REFRESH_MS = 2500;
 const MULTIPLAYER_CHANNEL_PREFIX = "tbpn-sim:world";
@@ -874,6 +893,17 @@ const goalpostCarryRightGripWorld = new THREE.Vector3();
 const goalpostCarryTargetLocal = new THREE.Vector3();
 const goalpostCarryRotationEuler = new THREE.Euler(0, 0, 0, "XYZ");
 const goalpostCarryQuaternion = new THREE.Quaternion();
+const basketballHoldForward = new THREE.Vector3();
+const basketballHoldRight = new THREE.Vector3();
+const basketballHoldPosition = new THREE.Vector3();
+const basketballHoldSpinAxis = new THREE.Vector3(1, 0.35, 0.2).normalize();
+const basketballShotPreviousPosition = new THREE.Vector3();
+const basketballShotPosition = new THREE.Vector3();
+const basketballShotMidpoint = new THREE.Vector3();
+const basketballShotControlPoint = new THREE.Vector3();
+const basketballShotLift = new THREE.Vector3(0, 1, 0);
+const basketballShotDeflectDirection = new THREE.Vector3();
+const basketballShotLandingPosition = new THREE.Vector3();
 const projectorDisplayCameraPosition = new THREE.Vector3();
 const projectorDisplayTargetPoint = new THREE.Vector3();
 const projectorDisplayRayDirection = new THREE.Vector3();
@@ -915,12 +945,14 @@ const state = {
   velocityY: 0,
   seatedSeat: null,
   carriedGoalpost: null,
+  carriedBasketball: null,
 };
 
 const clock = new THREE.Clock();
 const footstepState = { distance: 0, stride: 0.55 };
 let footstepAudioContext = null;
 let doorAudioContext = null;
+let basketballScoreAudioContext = null;
 
 let bgMusic = null;
 let bgMusicMuted = false;
@@ -1053,11 +1085,13 @@ const interactiveSeats = [];
 const interactiveNpcs = [];
 const interactiveGongs = [];
 const interactiveGoalposts = [];
+const interactiveBasketballs = [];
 const interactiveProjectors = [];
 const gongHitAnimations = [];
 const mirrorDistanceLods = [];
 const slidingShelfCameras = [];
 const npcPromptWorldPosition = new THREE.Vector3();
+let hangarBasketballHoop = null;
 
 function getSharedInteractiveId(prefix, collection) {
   return `${prefix}-${collection.length}`;
@@ -2415,7 +2449,7 @@ function getLocalMultiplayerPose() {
   if (state?.seatedSeat) {
     return "seated";
   }
-  if (state?.carriedGoalpost) {
+  if (state?.carriedGoalpost || state?.carriedBasketball) {
     return "carrying";
   }
   if ((playerState?.motion ?? 0) > 0.08) {
@@ -2434,6 +2468,17 @@ function buildLocalMultiplayerPresenceSnapshot() {
         rotationX: roundMultiplayerNumber(state.carriedGoalpost.object.rotation.x, 10000),
         rotationY: roundMultiplayerNumber(state.carriedGoalpost.object.rotation.y, 10000),
         rotationZ: roundMultiplayerNumber(state.carriedGoalpost.object.rotation.z, 10000),
+      }
+    : null;
+  const carriedBasketball = state.carriedBasketball
+    ? {
+        id: state.carriedBasketball.id,
+        x: roundMultiplayerNumber(state.carriedBasketball.object.position.x),
+        y: roundMultiplayerNumber(state.carriedBasketball.object.position.y),
+        z: roundMultiplayerNumber(state.carriedBasketball.object.position.z),
+        rotationX: roundMultiplayerNumber(state.carriedBasketball.object.rotation.x, 10000),
+        rotationY: roundMultiplayerNumber(state.carriedBasketball.object.rotation.y, 10000),
+        rotationZ: roundMultiplayerNumber(state.carriedBasketball.object.rotation.z, 10000),
       }
     : null;
 
@@ -2455,6 +2500,7 @@ function buildLocalMultiplayerPresenceSnapshot() {
       ? roundMultiplayerNumber(state.seatedSeat.surfaceHeight ?? DEFAULT_SEAT_SURFACE_HEIGHT)
       : null,
     carriedGoalpost,
+    carriedBasketball,
     updatedAt: Date.now(),
   };
 }
@@ -2479,6 +2525,13 @@ function getMultiplayerPayloadSignature(payload) {
     payload.carriedGoalpost?.rotationX ?? "",
     payload.carriedGoalpost?.rotationY ?? "",
     payload.carriedGoalpost?.rotationZ ?? "",
+    payload.carriedBasketball?.id ?? "",
+    payload.carriedBasketball?.x ?? "",
+    payload.carriedBasketball?.y ?? "",
+    payload.carriedBasketball?.z ?? "",
+    payload.carriedBasketball?.rotationX ?? "",
+    payload.carriedBasketball?.rotationY ?? "",
+    payload.carriedBasketball?.rotationZ ?? "",
   ].join("|");
 }
 
@@ -2511,6 +2564,18 @@ function normalizeMultiplayerPresenceSnapshot(snapshot) {
           rotationX: Number(snapshot.carriedGoalpost.rotationX),
           rotationY: Number(snapshot.carriedGoalpost.rotationY),
           rotationZ: Number(snapshot.carriedGoalpost.rotationZ),
+        }
+      : null;
+  const carriedBasketball =
+    snapshot.carriedBasketball && typeof snapshot.carriedBasketball === "object"
+      ? {
+          id: typeof snapshot.carriedBasketball.id === "string" ? snapshot.carriedBasketball.id : "",
+          x: Number(snapshot.carriedBasketball.x),
+          y: Number(snapshot.carriedBasketball.y),
+          z: Number(snapshot.carriedBasketball.z),
+          rotationX: Number(snapshot.carriedBasketball.rotationX),
+          rotationY: Number(snapshot.carriedBasketball.rotationY),
+          rotationZ: Number(snapshot.carriedBasketball.rotationZ),
         }
       : null;
 
@@ -2546,6 +2611,17 @@ function normalizeMultiplayerPresenceSnapshot(snapshot) {
       Number.isFinite(carriedGoalpost.rotationY) &&
       Number.isFinite(carriedGoalpost.rotationZ)
         ? carriedGoalpost
+        : null,
+    carriedBasketball:
+      carriedBasketball &&
+      carriedBasketball.id &&
+      Number.isFinite(carriedBasketball.x) &&
+      Number.isFinite(carriedBasketball.y) &&
+      Number.isFinite(carriedBasketball.z) &&
+      Number.isFinite(carriedBasketball.rotationX) &&
+      Number.isFinite(carriedBasketball.rotationY) &&
+      Number.isFinite(carriedBasketball.rotationZ)
+        ? carriedBasketball
         : null,
     updatedAt: Number.isFinite(Number(snapshot.updatedAt)) ? Number(snapshot.updatedAt) : 0,
   };
@@ -2757,6 +2833,23 @@ function handleMultiplayerBroadcast(payload) {
     });
   }
 
+  if (snapshot.carriedBasketball && !isLocalSnapshot) {
+    const basketball = findInteractiveBasketballById(snapshot.carriedBasketball.id);
+    if (!basketball || (!basketball.isFlying && basketball.pendingResetAt <= 0)) {
+      applySharedBasketballState({
+        ...snapshot.carriedBasketball,
+        isCarried: true,
+        isFlying: false,
+        carrierClientId: snapshot.clientId,
+        pendingResetAt: 0,
+        pendingResetAuthorityClientId: "",
+        flight: null,
+      }, {
+        eventOrder: nextMultiplayerWorldEventOrder(),
+      });
+    }
+  }
+
   if (isLocalSnapshot) {
     return;
   }
@@ -2784,6 +2877,10 @@ function findInteractiveGongById(id) {
 
 function findInteractiveGoalpostById(id) {
   return interactiveGoalposts.find((goalpost) => goalpost.id === id) ?? null;
+}
+
+function findInteractiveBasketballById(id) {
+  return interactiveBasketballs.find((basketball) => basketball.id === id) ?? null;
 }
 
 function setSharedDoorState(
@@ -2855,6 +2952,149 @@ function serializeGoalpostState(goalpost) {
   };
 }
 
+function serializeBasketballFlight(flight) {
+  if (!flight) {
+    return null;
+  }
+
+  return {
+    kind: flight.kind,
+    startedAt: Number.isFinite(flight.startedAt) ? flight.startedAt : Date.now(),
+    durationMs: Number.isFinite(flight.durationMs) ? flight.durationMs : 800,
+    authoritativeClientId: flight.authoritativeClientId || "",
+    shotId: flight.shotId || "",
+    startX: roundMultiplayerNumber(flight.startPosition?.x),
+    startY: roundMultiplayerNumber(flight.startPosition?.y),
+    startZ: roundMultiplayerNumber(flight.startPosition?.z),
+    controlX: roundMultiplayerNumber(flight.controlPoint?.x),
+    controlY: roundMultiplayerNumber(flight.controlPoint?.y),
+    controlZ: roundMultiplayerNumber(flight.controlPoint?.z),
+    endX: roundMultiplayerNumber(flight.endPosition?.x),
+    endY: roundMultiplayerNumber(flight.endPosition?.y),
+    endZ: roundMultiplayerNumber(flight.endPosition?.z),
+  };
+}
+
+function deserializeBasketballFlight(flightState) {
+  if (!flightState || typeof flightState !== "object") {
+    return null;
+  }
+
+  const values = [
+    Number(flightState.startX),
+    Number(flightState.startY),
+    Number(flightState.startZ),
+    Number(flightState.controlX),
+    Number(flightState.controlY),
+    Number(flightState.controlZ),
+    Number(flightState.endX),
+    Number(flightState.endY),
+    Number(flightState.endZ),
+  ];
+  if (values.some((value) => !Number.isFinite(value))) {
+    return null;
+  }
+
+  return createBasketballFlightState({
+    kind: flightState.kind === "blocked" ? "blocked" : "shot",
+    startPosition: new THREE.Vector3(values[0], values[1], values[2]),
+    controlPoint: new THREE.Vector3(values[3], values[4], values[5]),
+    endPosition: new THREE.Vector3(values[6], values[7], values[8]),
+    startedAt: Number.isFinite(Number(flightState.startedAt)) ? Number(flightState.startedAt) : Date.now(),
+    durationMs: Number.isFinite(Number(flightState.durationMs)) ? Number(flightState.durationMs) : 800,
+    authoritativeClientId:
+      typeof flightState.authoritativeClientId === "string" ? flightState.authoritativeClientId : "",
+    shotId: typeof flightState.shotId === "string" ? flightState.shotId : "",
+  });
+}
+
+function serializeBasketballState(basketball) {
+  return {
+    id: basketball.id,
+    carrierClientId: basketball.carrierClientId || "",
+    isCarried: Boolean(basketball.isCarried),
+    isFlying: Boolean(basketball.isFlying),
+    x: roundMultiplayerNumber(basketball.object.position.x),
+    y: roundMultiplayerNumber(basketball.object.position.y),
+    z: roundMultiplayerNumber(basketball.object.position.z),
+    rotationX: roundMultiplayerNumber(basketball.object.rotation.x, 10000),
+    rotationY: roundMultiplayerNumber(basketball.object.rotation.y, 10000),
+    rotationZ: roundMultiplayerNumber(basketball.object.rotation.z, 10000),
+    pendingResetAt: Number.isFinite(basketball.pendingResetAt) ? basketball.pendingResetAt : 0,
+    pendingResetAuthorityClientId: basketball.pendingResetAuthorityClientId || "",
+    flight: serializeBasketballFlight(basketball.flight),
+  };
+}
+
+function applySharedBasketballState(basketballState, { eventOrder = 0 } = {}) {
+  if (!basketballState || typeof basketballState !== "object") {
+    return false;
+  }
+
+  const basketball = findInteractiveBasketballById(basketballState.id);
+  if (!basketball) {
+    return false;
+  }
+
+  const x = Number(basketballState.x);
+  const y = Number(basketballState.y);
+  const z = Number(basketballState.z);
+  const rotationX = Number(basketballState.rotationX);
+  const rotationY = Number(basketballState.rotationY);
+  const rotationZ = Number(basketballState.rotationZ);
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(z) ||
+    !Number.isFinite(rotationX) ||
+    !Number.isFinite(rotationY) ||
+    !Number.isFinite(rotationZ)
+  ) {
+    return false;
+  }
+
+  recordMultiplayerWorldEvent(basketball, eventOrder);
+  basketball.carrierClientId =
+    typeof basketballState.carrierClientId === "string" ? basketballState.carrierClientId : "";
+  basketball.isCarried = Boolean(basketballState.isCarried);
+  basketball.isFlying = Boolean(basketballState.isFlying);
+  basketball.pendingResetAt = Number.isFinite(Number(basketballState.pendingResetAt))
+    ? Number(basketballState.pendingResetAt)
+    : 0;
+  basketball.pendingResetAuthorityClientId =
+    typeof basketballState.pendingResetAuthorityClientId === "string"
+      ? basketballState.pendingResetAuthorityClientId
+      : "";
+  basketball.flight = deserializeBasketballFlight(basketballState.flight);
+
+  if (state.carriedBasketball === basketball && basketball.carrierClientId !== multiplayerClientId) {
+    state.carriedBasketball = null;
+  }
+
+  basketball.object.position.set(x, y, z);
+  basketball.object.rotation.set(rotationX, rotationY, rotationZ);
+  basketball.heldPosition.copy(basketball.object.position);
+
+  if (basketball.isFlying && basketball.flight) {
+    const progress = clamp(
+      (Date.now() - basketball.flight.startedAt) / Math.max(1, basketball.flight.durationMs),
+      0,
+      1,
+    );
+    evaluateQuadraticBezier(
+      basketball.flight.startPosition,
+      basketball.flight.controlPoint,
+      basketball.flight.endPosition,
+      progress,
+      basketballShotPosition,
+    );
+    basketball.object.position.copy(basketballShotPosition);
+  }
+
+  updateBasketballInteractionPoint(basketball);
+  return true;
+}
+
 function applySharedGoalpostState(goalpostState, { eventOrder = 0 } = {}) {
   if (!goalpostState || typeof goalpostState !== "object") {
     return false;
@@ -2919,6 +3159,7 @@ function serializeSharedWorldState() {
       occupiedByClientId: seat.occupiedByClientId || "",
     })),
     goalposts: interactiveGoalposts.map((goalpost) => serializeGoalpostState(goalpost)),
+    basketballs: interactiveBasketballs.map((basketball) => serializeBasketballState(basketball)),
   };
 }
 
@@ -2949,6 +3190,14 @@ function applySharedWorldState(worldState, maxEventOrder = multiplayerWorldSyncR
       return;
     }
     applySharedGoalpostState(goalpostState);
+  });
+
+  (Array.isArray(worldState.basketballs) ? worldState.basketballs : []).forEach((basketballState) => {
+    const basketball = findInteractiveBasketballById(basketballState?.id);
+    if (!basketball || hasMultiplayerWorldEventAfter(basketball, maxEventOrder)) {
+      return;
+    }
+    applySharedBasketballState(basketballState);
   });
 }
 
@@ -3027,6 +3276,15 @@ function handleMultiplayerWorldEvent(payload) {
 
   if (payload.kind === "goalpost-state") {
     applySharedGoalpostState(payload.goalpost, { eventOrder });
+    return;
+  }
+
+  if (
+    payload.kind === "basketball-state" ||
+    payload.kind === "basketball-shot" ||
+    payload.kind === "basketball-block"
+  ) {
+    applySharedBasketballState(payload.basketball, { eventOrder });
   }
 }
 
@@ -3073,6 +3331,20 @@ function releaseSharedObjectsForClient(clientId) {
     droppedPosition.y = 0;
     setGoalpostPlacement(goalpost, droppedPosition, goalpost.object.rotation.y, { commit: true });
     setGoalpostColliderEnabled(goalpost, true);
+  });
+
+  interactiveBasketballs.forEach((basketball) => {
+    const wasAuthoredByClient =
+      basketball.carrierClientId === clientId ||
+      basketball.flight?.authoritativeClientId === clientId ||
+      basketball.pendingResetAuthorityClientId === clientId;
+    if (!wasAuthoredByClient) {
+      return;
+    }
+
+    resetBasketballToWorldPosition(basketball, basketball.spawnPosition, {
+      eventOrder,
+    });
   });
 }
 
@@ -3133,6 +3405,9 @@ function disconnectMultiplayerSession() {
   multiplayerLastErrorMessage = "";
 
   clearRemotePlayers();
+  interactiveBasketballs.forEach((basketball) => {
+    resetBasketballToWorldPosition(basketball, basketball.spawnPosition);
+  });
 
   if (channel) {
     void supabase.removeChannel(channel);
@@ -4282,6 +4557,7 @@ const startBgMusicOnInteraction = () => {
 canvas.addEventListener("click", startBgMusicOnInteraction);
 document.addEventListener("keydown", startBgMusicOnInteraction);
 canvas.addEventListener("click", maybeLockWalkthrough);
+canvas.addEventListener("mousedown", onCanvasMouseDown);
 projectorFullscreenCloseButton.addEventListener("click", closeProjectorFullscreen);
 document.addEventListener("fullscreenchange", syncProjectorFullscreenState);
 document.addEventListener("pointerlockchange", onPointerLockChange);
@@ -13368,6 +13644,11 @@ function addHangarBasketballHoop() {
   enableShadows(hoop);
   placePlanObject(hoop, hoopCenter, 0, Math.PI / 2, furnishingGroup);
   pushPlanRectCollider(hoopCenter, 1.06, 0.72, Math.PI / 2, PLAYER_RADIUS * 0.08);
+  hangarBasketballHoop = {
+    object: hoop,
+    rimCenter: hoop.localToWorld(new THREE.Vector3(0, 2.74, -0.64)),
+    scoreCenter: hoop.localToWorld(new THREE.Vector3(0, 2.36, -0.64)),
+  };
 
   const fridgeCenter = [hoopCenter[0] + 0.22, hoopCenter[1] + 1.08];
   const fridge = new THREE.Group();
@@ -13514,6 +13795,37 @@ function addHangarBasketballHoop() {
   enableShadows(fridge);
   placePlanObject(fridge, fridgeCenter, 0, Math.PI / 2, furnishingGroup);
   pushPlanRectCollider(fridgeCenter, 0.72, 0.68, 0, PLAYER_RADIUS * 0.08);
+
+  const toyBasketball = new THREE.Group();
+  const shell = new THREE.Mesh(
+    new THREE.SphereGeometry(TOY_BASKETBALL_RADIUS, 28, 22),
+    new THREE.MeshStandardMaterial({
+      color: "#d96a1f",
+      roughness: 0.82,
+      metalness: 0.05,
+    }),
+  );
+  toyBasketball.add(shell);
+
+  const seamMaterial = new THREE.MeshStandardMaterial({
+    color: "#1b120d",
+    roughness: 0.92,
+    metalness: 0.02,
+  });
+  const seamOne = new THREE.Mesh(
+    new THREE.TorusGeometry(TOY_BASKETBALL_RADIUS * 0.98, 0.006, 8, 42),
+    seamMaterial,
+  );
+  toyBasketball.add(seamOne);
+  const seamTwo = seamOne.clone();
+  seamTwo.rotation.x = Math.PI / 2;
+  toyBasketball.add(seamTwo);
+
+  enableShadows(toyBasketball);
+  const toyBasketballSpawn = toWorldPoint([hoopCenter[0] - 0.64, hoopCenter[1] - 0.14]);
+  toyBasketball.position.set(toyBasketballSpawn.x, TOY_BASKETBALL_RADIUS, toyBasketballSpawn.z);
+  furnishingGroup.add(toyBasketball);
+  registerInteractiveBasketball(toyBasketball);
 }
 
 function addFootballGoalpost(center, rotation = 0) {
@@ -15844,6 +16156,504 @@ function dropCarriedGoalpost(force = false, { broadcast = true, issuedAt = Date.
   return true;
 }
 
+function registerInteractiveBasketball(object) {
+  const basketball = {
+    id: getSharedInteractiveId("basketball", interactiveBasketballs),
+    object,
+    interactionPoint: new THREE.Vector3(),
+    promptAnchor: object,
+    promptOffsetY: 0.12,
+    promptRadius: TOY_BASKETBALL_PICKUP_RADIUS,
+    spawnPosition: object.position.clone(),
+    heldPosition: object.position.clone(),
+    carrierClientId: "",
+    isCarried: false,
+    isFlying: false,
+    pendingResetAt: 0,
+    pendingResetAuthorityClientId: "",
+    flight: null,
+    lastWorldEventOrder: 0,
+  };
+
+  interactiveBasketballs.push(basketball);
+  updateBasketballInteractionPoint(basketball);
+  return basketball;
+}
+
+function updateBasketballInteractionPoint(basketball) {
+  basketball.interactionPoint.set(
+    basketball.object.position.x,
+    Math.max(
+      TOY_BASKETBALL_INTERACTION_HEIGHT,
+      basketball.object.position.y + TOY_BASKETBALL_RADIUS * 0.2,
+    ),
+    basketball.object.position.z,
+  );
+}
+
+function createBasketballFlightState({
+  kind = "shot",
+  startPosition,
+  controlPoint,
+  endPosition,
+  startedAt = Date.now(),
+  durationMs = 900,
+  authoritativeClientId = "",
+  shotId = "",
+} = {}) {
+  if (!startPosition || !controlPoint || !endPosition) {
+    return null;
+  }
+
+  return {
+    kind,
+    startPosition: startPosition.clone(),
+    controlPoint: controlPoint.clone(),
+    endPosition: endPosition.clone(),
+    startedAt,
+    durationMs,
+    authoritativeClientId,
+    shotId,
+  };
+}
+
+function resetBasketballToWorldPosition(
+  basketball,
+  worldPosition,
+  { broadcast = false, issuedAt = Date.now(), eventOrder = 0 } = {},
+) {
+  if (!basketball || !worldPosition) {
+    return false;
+  }
+
+  const shouldRecordEvent = (Number.isFinite(eventOrder) && eventOrder > 0) || broadcast;
+  if (shouldRecordEvent) {
+    const resolvedEventOrder =
+      Number.isFinite(eventOrder) && eventOrder > 0 ? eventOrder : nextMultiplayerWorldEventOrder();
+    recordMultiplayerWorldEvent(basketball, resolvedEventOrder);
+  }
+  basketball.carrierClientId = "";
+  basketball.isCarried = false;
+  basketball.isFlying = false;
+  basketball.pendingResetAt = 0;
+  basketball.pendingResetAuthorityClientId = "";
+  basketball.flight = null;
+  if (state.carriedBasketball === basketball) {
+    state.carriedBasketball = null;
+  }
+  basketball.object.position.set(worldPosition.x, TOY_BASKETBALL_RADIUS, worldPosition.z);
+  basketball.object.rotation.set(0, 0, 0);
+  basketball.heldPosition.copy(basketball.object.position);
+  updateBasketballInteractionPoint(basketball);
+
+  if (broadcast) {
+    broadcastMultiplayerWorldEvent("basketball-state", {
+      basketball: serializeBasketballState(basketball),
+    }, issuedAt);
+  }
+
+  return true;
+}
+
+function getBasketballHoldPosition(target = new THREE.Vector3()) {
+  if (state.walkView === "firstPerson") {
+    getLookDirection(playerState.yaw, clamp(playerState.pitch * 0.45, -0.18, 0.26), basketballHoldForward);
+    basketballHoldRight.set(-basketballHoldForward.z, 0, basketballHoldForward.x).normalize();
+    return target
+      .copy(playerState.position)
+      .addScaledVector(basketballHoldForward, TOY_BASKETBALL_HOLD_FORWARD_FIRST_PERSON)
+      .addScaledVector(basketballHoldRight, TOY_BASKETBALL_HOLD_SIDE_FIRST_PERSON)
+      .setY(playerState.position.y + TOY_BASKETBALL_HOLD_VERTICAL_FIRST_PERSON);
+  }
+
+  getFlatLookDirection(playerState.facingYaw, basketballHoldForward);
+  basketballHoldRight.set(-basketballHoldForward.z, 0, basketballHoldForward.x).normalize();
+  return target
+    .copy(playerState.position)
+    .addScaledVector(basketballHoldForward, TOY_BASKETBALL_HOLD_FORWARD_THIRD_PERSON)
+    .addScaledVector(basketballHoldRight, TOY_BASKETBALL_HOLD_SIDE_THIRD_PERSON)
+    .setY(TOY_BASKETBALL_HOLD_HEIGHT_THIRD_PERSON);
+}
+
+function updateCarriedBasketballPlacement() {
+  const basketball = state.carriedBasketball;
+  if (!basketball || basketball.carrierClientId !== multiplayerClientId) {
+    return;
+  }
+
+  getBasketballHoldPosition(basketballHoldPosition);
+  basketball.object.position.copy(basketballHoldPosition);
+  basketball.heldPosition.copy(basketball.object.position);
+  basketball.object.rotateOnWorldAxis(basketballHoldSpinAxis, 0.045);
+  basketball.object.rotation.y += 0.02;
+  updateBasketballInteractionPoint(basketball);
+}
+
+function getBasketballDropPosition(basketball, target = new THREE.Vector3()) {
+  const carryYaw = state.walkView === "firstPerson" ? playerState.yaw : playerState.facingYaw;
+  getFlatLookDirection(carryYaw, basketballHoldForward);
+  target
+    .copy(playerState.position)
+    .addScaledVector(basketballHoldForward, TOY_BASKETBALL_DROP_DISTANCE)
+    .setY(TOY_BASKETBALL_RADIUS);
+
+  if (!isPointInAccessibleArea(new THREE.Vector2(target.x, target.z))) {
+    target.copy(basketball.spawnPosition);
+  }
+
+  target.y = TOY_BASKETBALL_RADIUS;
+  return target;
+}
+
+function startCarryingBasketball(basketball, { broadcast = true, issuedAt = Date.now() } = {}) {
+  if (
+    !basketball ||
+    state.carriedBasketball ||
+    state.carriedGoalpost ||
+    state.seatedSeat ||
+    basketball.isFlying ||
+    (basketball.isCarried && basketball.carrierClientId !== multiplayerClientId)
+  ) {
+    return false;
+  }
+
+  const eventOrder = nextMultiplayerWorldEventOrder();
+  recordMultiplayerWorldEvent(basketball, eventOrder);
+  basketball.pendingResetAt = 0;
+  basketball.pendingResetAuthorityClientId = "";
+  basketball.flight = null;
+  basketball.isFlying = false;
+  basketball.isCarried = true;
+  basketball.carrierClientId = multiplayerClientId;
+  state.carriedBasketball = basketball;
+  updateCarriedBasketballPlacement();
+
+  if (broadcast) {
+    broadcastMultiplayerWorldEvent("basketball-state", {
+      basketball: serializeBasketballState(basketball),
+    }, issuedAt);
+  }
+
+  return true;
+}
+
+function dropCarriedBasketball(force = false, { broadcast = true, issuedAt = Date.now() } = {}) {
+  const basketball = state.carriedBasketball;
+  if (!basketball) {
+    return false;
+  }
+
+  const target = getBasketballDropPosition(basketball, basketballShotLandingPosition);
+  if (!force && !isPointInAccessibleArea(new THREE.Vector2(target.x, target.z))) {
+    return false;
+  }
+
+  return resetBasketballToWorldPosition(basketball, target, { broadcast, issuedAt });
+}
+
+function playBasketballScoreSound() {
+  const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextCtor) {
+    return;
+  }
+
+  if (!basketballScoreAudioContext) {
+    basketballScoreAudioContext = new AudioContextCtor();
+  }
+  if (basketballScoreAudioContext.state === "suspended") {
+    basketballScoreAudioContext.resume().catch(() => {});
+  }
+
+  const ctx = basketballScoreAudioContext;
+  const now = ctx.currentTime;
+  const notes = [
+    { offset: 0, frequency: 830, duration: 0.09, gain: 0.045 },
+    { offset: 0.09, frequency: 1240, duration: 0.14, gain: 0.06 },
+  ];
+
+  notes.forEach(({ offset, frequency, duration, gain }) => {
+    const osc = ctx.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(frequency, now + offset);
+    osc.frequency.exponentialRampToValueAtTime(frequency * 1.08, now + offset + duration);
+
+    const shimmer = ctx.createOscillator();
+    shimmer.type = "square";
+    shimmer.frequency.setValueAtTime(frequency * 2, now + offset);
+
+    const noteGain = ctx.createGain();
+    noteGain.gain.setValueAtTime(0.0001, now + offset);
+    noteGain.gain.exponentialRampToValueAtTime(gain, now + offset + 0.012);
+    noteGain.gain.exponentialRampToValueAtTime(0.0001, now + offset + duration);
+
+    osc.connect(noteGain);
+    shimmer.connect(noteGain);
+    noteGain.connect(ctx.destination);
+
+    osc.start(now + offset);
+    shimmer.start(now + offset);
+    osc.stop(now + offset + duration + 0.02);
+    shimmer.stop(now + offset + duration + 0.02);
+  });
+}
+
+function getBasketballBlockers(shooterClientId = "") {
+  const blockers = [];
+
+  if (multiplayerClientId !== shooterClientId) {
+    const groundY = Math.max(0, playerState.position.y - PLAYER_HEIGHT);
+    blockers.push({
+      clientId: multiplayerClientId,
+      center: new THREE.Vector3(playerState.position.x, groundY + 0.96, playerState.position.z),
+      radius: TOY_BASKETBALL_BLOCK_TORSO_RADIUS,
+    });
+    blockers.push({
+      clientId: multiplayerClientId,
+      center: new THREE.Vector3(playerState.position.x, groundY + 1.55, playerState.position.z),
+      radius: TOY_BASKETBALL_BLOCK_HEAD_RADIUS,
+    });
+  }
+
+  remotePlayers.forEach((entry) => {
+    if (entry.clientId === shooterClientId) {
+      return;
+    }
+
+    const baseY = entry.avatar.group.position.y;
+    blockers.push({
+      clientId: entry.clientId,
+      center: new THREE.Vector3(entry.avatar.group.position.x, baseY + 0.96, entry.avatar.group.position.z),
+      radius: TOY_BASKETBALL_BLOCK_TORSO_RADIUS,
+    });
+    blockers.push({
+      clientId: entry.clientId,
+      center: new THREE.Vector3(entry.avatar.group.position.x, baseY + 1.55, entry.avatar.group.position.z),
+      radius: TOY_BASKETBALL_BLOCK_HEAD_RADIUS,
+    });
+  });
+
+  return blockers;
+}
+
+function getBasketballShotBlocker(basketball, fromPosition, toPosition) {
+  const shooterClientId = basketball.flight?.authoritativeClientId || basketball.carrierClientId || multiplayerClientId;
+  const blockers = getBasketballBlockers(shooterClientId);
+  return (
+    blockers.find((blocker) =>
+      segmentIntersectsSphere(fromPosition, toPosition, blocker.center, blocker.radius + TOY_BASKETBALL_RADIUS * 0.8),
+    ) ?? null
+  );
+}
+
+function startBasketballBlockedFlight(
+  basketball,
+  blockPosition,
+  blocker,
+  { broadcast = true, issuedAt = Date.now(), shotId = basketball.flight?.shotId ?? "" } = {},
+) {
+  if (!basketball || !blockPosition || !blocker) {
+    return false;
+  }
+
+  basketballShotDeflectDirection.copy(blockPosition).sub(blocker.center);
+  if (basketballShotDeflectDirection.lengthSq() < 0.0001) {
+    basketballShotDeflectDirection.copy(blockPosition).sub(basketball.flight?.startPosition ?? basketball.spawnPosition);
+  }
+  basketballShotDeflectDirection.y = Math.max(0.4, basketballShotDeflectDirection.y + 0.58);
+  basketballShotDeflectDirection.normalize();
+
+  basketballShotLandingPosition
+    .copy(blockPosition)
+    .addScaledVector(basketballShotDeflectDirection, TOY_BASKETBALL_BLOCK_DEFLECT_DISTANCE)
+    .setY(TOY_BASKETBALL_RADIUS);
+  if (!isPointInAccessibleArea(new THREE.Vector2(basketballShotLandingPosition.x, basketballShotLandingPosition.z))) {
+    basketballShotLandingPosition.copy(basketball.spawnPosition);
+  }
+
+  basketballShotControlPoint
+    .copy(blockPosition)
+    .lerp(basketballShotLandingPosition, 0.5)
+    .addScaledVector(basketballShotLift, 0.72);
+
+  basketball.isCarried = false;
+  basketball.carrierClientId = "";
+  basketball.isFlying = true;
+  basketball.pendingResetAt = 0;
+  basketball.pendingResetAuthorityClientId = "";
+  basketball.flight = createBasketballFlightState({
+    kind: "blocked",
+    startPosition: blockPosition,
+    controlPoint: basketballShotControlPoint,
+    endPosition: basketballShotLandingPosition,
+    startedAt: issuedAt,
+    durationMs: 430,
+    authoritativeClientId: multiplayerClientId,
+    shotId,
+  });
+  basketball.object.position.copy(blockPosition);
+  updateBasketballInteractionPoint(basketball);
+
+  if (broadcast) {
+    broadcastMultiplayerWorldEvent("basketball-block", {
+      blockerClientId: blocker.clientId,
+      basketball: serializeBasketballState(basketball),
+    }, issuedAt);
+  }
+
+  return true;
+}
+
+function shootCarriedBasketball({ broadcast = true, issuedAt = Date.now() } = {}) {
+  const basketball = state.carriedBasketball;
+  if (!basketball || !hangarBasketballHoop) {
+    return false;
+  }
+
+  const shotId = `${multiplayerClientId}:${issuedAt}`;
+  const shotDistance = basketball.object.position.distanceTo(hangarBasketballHoop.rimCenter);
+  basketballShotMidpoint.copy(basketball.object.position).lerp(hangarBasketballHoop.rimCenter, 0.5);
+  basketballShotControlPoint.copy(basketballShotMidpoint);
+  basketballShotControlPoint.y =
+    Math.max(basketball.object.position.y, hangarBasketballHoop.rimCenter.y) +
+    TOY_BASKETBALL_SHOT_ARC_BASE +
+    shotDistance * TOY_BASKETBALL_SHOT_ARC_DISTANCE_FACTOR;
+  basketballShotControlPoint.x += Math.sin(playerState.yaw) * 0.08;
+  basketballShotControlPoint.z += Math.cos(playerState.yaw) * 0.08;
+
+  const durationMs = clamp(
+    620 + basketball.object.position.distanceTo(hangarBasketballHoop.scoreCenter) * 65,
+    680,
+    1250,
+  );
+
+  const eventOrder = nextMultiplayerWorldEventOrder();
+  recordMultiplayerWorldEvent(basketball, eventOrder);
+  basketball.isCarried = false;
+  basketball.carrierClientId = "";
+  state.carriedBasketball = null;
+  basketball.isFlying = true;
+  basketball.pendingResetAt = 0;
+  basketball.pendingResetAuthorityClientId = "";
+  basketball.flight = createBasketballFlightState({
+    kind: "shot",
+    startPosition: basketball.object.position,
+    controlPoint: basketballShotControlPoint,
+    endPosition: hangarBasketballHoop.scoreCenter,
+    startedAt: issuedAt,
+    durationMs,
+    authoritativeClientId: multiplayerClientId,
+    shotId,
+  });
+  updateBasketballInteractionPoint(basketball);
+
+  if (broadcast) {
+    broadcastMultiplayerWorldEvent("basketball-shot", {
+      basketball: serializeBasketballState(basketball),
+    }, issuedAt);
+  }
+
+  return true;
+}
+
+function updateBasketballFlight(basketball) {
+  if (!basketball?.flight) {
+    return;
+  }
+
+  const now = Date.now();
+  const progress = clamp(
+    (now - basketball.flight.startedAt) / Math.max(1, basketball.flight.durationMs),
+    0,
+    1,
+  );
+  basketballShotPreviousPosition.copy(basketball.object.position);
+  evaluateQuadraticBezier(
+    basketball.flight.startPosition,
+    basketball.flight.controlPoint,
+    basketball.flight.endPosition,
+    progress,
+    basketballShotPosition,
+  );
+  if (basketball.flight.kind === "shot" && hangarBasketballHoop) {
+    const heatseekProgress = clamp(
+      (progress - TOY_BASKETBALL_HEATSEEK_START) /
+      Math.max(0.0001, TOY_BASKETBALL_HEATSEEK_END - TOY_BASKETBALL_HEATSEEK_START),
+      0,
+      1,
+    );
+    const magnetTarget = heatseekProgress < 0.82
+      ? hangarBasketballHoop.rimCenter
+      : hangarBasketballHoop.scoreCenter;
+    const magnetBlend = Math.sin(heatseekProgress * Math.PI * 0.5) * TOY_BASKETBALL_HEATSEEK_STRENGTH;
+    basketballShotPosition.lerp(magnetTarget, magnetBlend);
+  }
+  basketball.object.position.copy(basketballShotPosition);
+  basketball.object.rotateOnWorldAxis(basketballHoldSpinAxis, 0.16);
+  basketball.object.rotation.y += 0.05;
+  updateBasketballInteractionPoint(basketball);
+
+  if (
+    basketball.flight.kind === "shot" &&
+    basketball.flight.authoritativeClientId === multiplayerClientId
+  ) {
+    const blocker = getBasketballShotBlocker(
+      basketball,
+      basketballShotPreviousPosition,
+      basketballShotPosition,
+    );
+    if (blocker) {
+      startBasketballBlockedFlight(basketball, basketballShotPosition.clone(), blocker, {
+        shotId: basketball.flight.shotId,
+      });
+      return;
+    }
+  }
+
+  if (progress < 1) {
+    return;
+  }
+
+  if (basketball.flight.kind === "blocked") {
+    resetBasketballToWorldPosition(basketball, basketball.flight.endPosition, {
+      broadcast: basketball.flight.authoritativeClientId === multiplayerClientId,
+      issuedAt: now,
+    });
+    return;
+  }
+
+  playBasketballScoreSound();
+  basketball.isFlying = false;
+  basketball.pendingResetAt = now + TOY_BASKETBALL_SCORE_SETTLE_MS;
+  basketball.pendingResetAuthorityClientId = basketball.flight.authoritativeClientId || "";
+  basketball.object.position.copy(basketball.flight.endPosition);
+  basketball.flight = null;
+  updateBasketballInteractionPoint(basketball);
+}
+
+function updateInteractiveBasketballs() {
+  interactiveBasketballs.forEach((basketball) => {
+    if (basketball.isCarried && basketball.carrierClientId === multiplayerClientId) {
+      updateCarriedBasketballPlacement();
+      return;
+    }
+
+    if (basketball.isFlying) {
+      updateBasketballFlight(basketball);
+      return;
+    }
+
+    if (
+      basketball.pendingResetAt > 0 &&
+      Date.now() >= basketball.pendingResetAt
+    ) {
+      resetBasketballToWorldPosition(basketball, basketball.spawnPosition, {
+        broadcast: basketball.pendingResetAuthorityClientId === multiplayerClientId,
+        issuedAt: Date.now(),
+      });
+    }
+  });
+}
+
 function getHorseStatueColliderRects(statue, bounds) {
   const size = new THREE.Vector3();
   bounds.getSize(size);
@@ -17218,6 +18028,13 @@ function getNearestInteraction() {
         target: goalpost,
         distance: goalpost.interactionPoint.distanceTo(playerState.position),
       })),
+    ...interactiveBasketballs
+      .filter((basketball) => !basketball.isCarried && !basketball.isFlying && basketball.pendingResetAt <= 0)
+      .map((basketball) => ({
+        type: "basketball",
+        target: basketball,
+        distance: basketball.interactionPoint.distanceTo(playerState.position),
+      })),
     ...interactiveProjectors.map((projector) => ({
       type: "projector",
       target: projector,
@@ -17294,6 +18111,20 @@ function updateInteractionPrompt(elapsedTime) {
     return;
   }
 
+  if (state.carriedBasketball) {
+    if (!positionInteractionPrompt(state.carriedBasketball)) {
+      hideInteractionPrompt();
+      return;
+    }
+    interactionPromptEyebrow.textContent = "Basketball";
+    interactionPromptTitle.textContent = "Click to Shoot";
+    interactionPromptLine.textContent = "Press E to drop the toy ball.";
+    setInteractionPromptCooldown(false);
+    interactionPrompt.classList.remove("npc-prompt--hidden");
+    interactionPrompt.setAttribute("aria-hidden", "false");
+    return;
+  }
+
   if (state.carriedGoalpost) {
     if (!positionInteractionPrompt(state.carriedGoalpost)) {
       hideInteractionPrompt();
@@ -17345,6 +18176,11 @@ function updateInteractionPrompt(elapsedTime) {
     interactionPromptEyebrow.textContent = "Goal Post";
     interactionPromptTitle.textContent = "Press E to Pick Up";
     interactionPromptLine.textContent = "Carry it to a new spot.";
+    setInteractionPromptCooldown(false);
+  } else if (nearestInteraction.type === "basketball") {
+    interactionPromptEyebrow.textContent = "Basketball";
+    interactionPromptTitle.textContent = "Press E to Pick Up";
+    interactionPromptLine.textContent = "Click to shoot. Makes are sticky unless blocked.";
     setInteractionPromptCooldown(false);
   } else if (nearestInteraction.type === "projector") {
     interactionPromptEyebrow.textContent = nearestInteraction.target.promptEyebrow;
@@ -17673,6 +18509,11 @@ function standUpFromSeat({ broadcast = true, issuedAt = Date.now() } = {}) {
 }
 
 function toggleNearestInteraction() {
+  if (state.carriedBasketball) {
+    dropCarriedBasketball();
+    return;
+  }
+
   if (state.carriedGoalpost) {
     dropCarriedGoalpost();
     return;
@@ -17700,6 +18541,11 @@ function toggleNearestInteraction() {
 
   if (nearestInteraction.type === "goalpost") {
     startCarryingGoalpost(nearestInteraction.target);
+    return;
+  }
+
+  if (nearestInteraction.type === "basketball") {
+    startCarryingBasketball(nearestInteraction.target);
     return;
   }
 
@@ -19044,10 +19890,10 @@ function animateRemotePlayers(delta, elapsedTime) {
     }
 
     const stride = Math.sin((elapsedTime + entry.animationPhase) * (7 + visibleMotion * 5)) * visibleMotion;
-    entry.avatar.leftArmPivot.rotation.x = stride * 0.85;
-    entry.avatar.rightArmPivot.rotation.x = -stride * 0.85;
+    entry.avatar.leftArmPivot.rotation.x = entry.pose === "carrying" ? stride * 0.42 : stride * 0.85;
+    entry.avatar.rightArmPivot.rotation.x = entry.pose === "carrying" ? -0.98 + stride * 0.12 : -stride * 0.85;
     entry.avatar.leftArmPivot.rotation.z = 0;
-    entry.avatar.rightArmPivot.rotation.z = 0;
+    entry.avatar.rightArmPivot.rotation.z = entry.pose === "carrying" ? 0.16 : 0;
     entry.avatar.leftLegPivot.rotation.x = -stride * 0.72;
     entry.avatar.rightLegPivot.rotation.x = stride * 0.72;
     entry.avatar.leftKneePivot.rotation.x = 0;
@@ -19090,6 +19936,7 @@ function syncPlayerPresentation(delta, elapsedTime) {
     showBodyInFirstPerson ||
     isCircleTableCamera;
   const isCarryingGoalpost = Boolean(state.carriedGoalpost);
+  const isCarryingBasketball = Boolean(state.carriedBasketball);
   playerAvatar.group.visible = avatarVisible;
   // Keep the body visible in standing first person, but never render the local head into the camera.
   playerAvatar.neck.visible = !isFirstPersonCamera;
@@ -19126,6 +19973,16 @@ function syncPlayerPresentation(delta, elapsedTime) {
       playerAvatar.leftLegPivot.rotation.x = stride * -0.42;
       playerAvatar.rightLegPivot.rotation.x = stride * 0.42;
       playerAvatar.torso.rotation.z = 0.04;
+      playerAvatar.root.position.y = 0;
+    } else if (isCarryingBasketball) {
+      const stride = Math.sin(elapsedTime * (7 + playerState.motion * 5)) * playerState.motion;
+      playerAvatar.leftArmPivot.rotation.x = stride * 0.42;
+      playerAvatar.rightArmPivot.rotation.x = -0.98 + stride * 0.12;
+      playerAvatar.leftArmPivot.rotation.z = 0;
+      playerAvatar.rightArmPivot.rotation.z = 0.16;
+      playerAvatar.leftLegPivot.rotation.x = -stride * 0.72;
+      playerAvatar.rightLegPivot.rotation.x = stride * 0.72;
+      playerAvatar.torso.rotation.z = 0.03;
       playerAvatar.root.position.y = 0;
     } else {
       const stride = Math.sin(elapsedTime * (7 + playerState.motion * 5)) * playerState.motion;
@@ -19272,8 +20129,9 @@ function animate() {
 
   syncPlayerPresentation(delta, elapsedTime);
   animateRemotePlayers(delta, elapsedTime);
-  scheduleLocalMultiplayerPresence();
   updateCarriedGoalpostPlacement();
+  updateInteractiveBasketballs();
+  scheduleLocalMultiplayerPresence();
   updateInteractionPrompt(elapsedTime);
   forecastFrenzy.update(delta, elapsedTime);
   tylerBoard.update(delta, elapsedTime);
@@ -19433,6 +20291,7 @@ function enterWalkMode(view = "firstPerson") {
 
 function enterOverviewMode(shouldUnlock = true) {
   dropCarriedGoalpost(true);
+  dropCarriedBasketball(true);
   clearMovementState();
   standUpFromSeat();
   playerState.motion = 0;
@@ -19564,6 +20423,23 @@ function onPointerMove(event) {
     -PLAYER_MAX_PITCH,
     PLAYER_MAX_PITCH,
   );
+}
+
+function onCanvasMouseDown(event) {
+  if (
+    event.button !== 0 ||
+    state.mode !== "walk" ||
+    !isPointerLocked ||
+    !state.carriedBasketball ||
+    isSuggestionPanelOpen ||
+    isSessionGateOpen() ||
+    isProjectorFullscreenOpen()
+  ) {
+    return;
+  }
+
+  event.preventDefault();
+  shootCarriedBasketball();
 }
 
 function maybeLockWalkthrough() {
@@ -19794,6 +20670,49 @@ function clearMovementState() {
   state.moveRight = false;
   state.sprint = false;
   state.velocityY = 0;
+}
+
+function evaluateQuadraticBezier(start, control, end, t, target = new THREE.Vector3()) {
+  const inverse = 1 - t;
+  return target.set(
+    inverse * inverse * start.x + 2 * inverse * t * control.x + t * t * end.x,
+    inverse * inverse * start.y + 2 * inverse * t * control.y + t * t * end.y,
+    inverse * inverse * start.z + 2 * inverse * t * control.z + t * t * end.z,
+  );
+}
+
+function segmentIntersectsSphere(start, end, center, radius) {
+  if (!start || !end || !center || !Number.isFinite(radius) || radius <= 0) {
+    return false;
+  }
+
+  const segmentX = end.x - start.x;
+  const segmentY = end.y - start.y;
+  const segmentZ = end.z - start.z;
+  const segmentLengthSquared = segmentX * segmentX + segmentY * segmentY + segmentZ * segmentZ;
+  if (segmentLengthSquared <= 0.000001) {
+    const dx = start.x - center.x;
+    const dy = start.y - center.y;
+    const dz = start.z - center.z;
+    return dx * dx + dy * dy + dz * dz <= radius * radius;
+  }
+
+  const t = clamp(
+    (
+      (center.x - start.x) * segmentX +
+      (center.y - start.y) * segmentY +
+      (center.z - start.z) * segmentZ
+    ) / segmentLengthSquared,
+    0,
+    1,
+  );
+  const closestX = start.x + segmentX * t;
+  const closestY = start.y + segmentY * t;
+  const closestZ = start.z + segmentZ * t;
+  const dx = closestX - center.x;
+  const dy = closestY - center.y;
+  const dz = closestZ - center.z;
+  return dx * dx + dy * dy + dz * dz <= radius * radius;
 }
 
 function pointInPolygon(point, polygon) {
