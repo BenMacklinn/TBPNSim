@@ -897,6 +897,15 @@ const basketballHoldForward = new THREE.Vector3();
 const basketballHoldRight = new THREE.Vector3();
 const basketballHoldPosition = new THREE.Vector3();
 const basketballHoldSpinAxis = new THREE.Vector3(1, 0.35, 0.2).normalize();
+const basketballCarryEuler = new THREE.Euler(0, 0, 0, "XYZ");
+const basketballCarryQuaternion = new THREE.Quaternion();
+const basketballRightContactLocal = new THREE.Vector3(TOY_BASKETBALL_RADIUS * 0.78, 0.01, 0.01);
+const basketballLeftContactLocal = new THREE.Vector3(-TOY_BASKETBALL_RADIUS * 0.44, 0.02, 0.095);
+const basketballRightHandWorld = new THREE.Vector3();
+const basketballLeftHandWorld = new THREE.Vector3();
+const basketballRightContactWorld = new THREE.Vector3();
+const basketballLeftContactWorld = new THREE.Vector3();
+const basketballCarryDelta = new THREE.Vector3();
 const basketballShotPreviousPosition = new THREE.Vector3();
 const basketballShotPosition = new THREE.Vector3();
 const basketballShotMidpoint = new THREE.Vector3();
@@ -14411,6 +14420,86 @@ function setGoalpostCarryPose(goalpost) {
   setThirdPersonGoalpostCarryPose(goalpost);
 }
 
+function getAvatarHandWorldPosition(avatar, hand = "right", target = new THREE.Vector3()) {
+  const handNode = hand === "left" ? avatar.leftHand : avatar.rightHand;
+  if (!handNode) {
+    return target.set(0, 0, 0);
+  }
+
+  handNode.getWorldPosition(target);
+  return target;
+}
+
+function updateBasketballCarryContactTargets(basketball) {
+  basketballRightContactWorld
+    .copy(basketballRightContactLocal)
+    .applyQuaternion(basketballCarryQuaternion)
+    .add(basketball.object.position);
+  basketballLeftContactWorld
+    .copy(basketballLeftContactLocal)
+    .applyQuaternion(basketballCarryQuaternion)
+    .add(basketball.object.position);
+}
+
+function setBasketballCarryPoseForAvatar(
+  basketball,
+  avatar,
+  { carryYaw = avatar.root.rotation.y, firstPerson = false } = {},
+) {
+  if (firstPerson) {
+    getLookDirection(
+      carryYaw,
+      clamp(playerState.pitch * 0.55, -0.3, 0.24),
+      basketballHoldForward,
+    );
+  } else {
+    basketballHoldForward.set(-Math.sin(carryYaw), 0, -Math.cos(carryYaw));
+  }
+  basketballHoldRight.set(-basketballHoldForward.z, 0, basketballHoldForward.x).normalize();
+
+  basketballCarryEuler.set(
+    firstPerson ? 0.38 : 0.16,
+    carryYaw - (firstPerson ? 0.18 : 0.08),
+    firstPerson ? -0.58 : -0.34,
+  );
+  basketballCarryQuaternion.setFromEuler(basketballCarryEuler);
+
+  basketballHoldPosition.copy(avatar.rightArmPivot.position);
+  avatar.root.localToWorld(basketballHoldPosition);
+  basketballHoldPosition.y -= firstPerson ? 0.34 : 0.28;
+  basketballHoldPosition.addScaledVector(basketballHoldForward, firstPerson ? 0.44 : 0.34);
+  basketballHoldPosition.addScaledVector(basketballHoldRight, firstPerson ? 0.08 : -0.01);
+
+  basketball.object.position.copy(basketballHoldPosition);
+  basketball.object.rotation.copy(basketballCarryEuler);
+
+  updateBasketballCarryContactTargets(basketball);
+  setArmPoseToWorldTargetForAvatar(avatar, avatar.rightArmPivot, basketballRightContactWorld);
+  setArmPoseToWorldTargetForAvatar(avatar, avatar.leftArmPivot, basketballLeftContactWorld);
+
+  avatar.group.updateWorldMatrix(true, true);
+  getAvatarHandWorldPosition(avatar, "right", basketballRightHandWorld);
+  basketballCarryDelta.copy(basketballRightHandWorld).sub(basketballRightContactWorld);
+  basketball.object.position.addScaledVector(basketballCarryDelta, 0.92);
+
+  updateBasketballCarryContactTargets(basketball);
+  setArmPoseToWorldTargetForAvatar(avatar, avatar.rightArmPivot, basketballRightContactWorld);
+  setArmPoseToWorldTargetForAvatar(avatar, avatar.leftArmPivot, basketballLeftContactWorld);
+
+  avatar.group.updateWorldMatrix(true, true);
+  getAvatarHandWorldPosition(avatar, "left", basketballLeftHandWorld);
+  basketballCarryDelta.copy(basketballLeftHandWorld).sub(basketballLeftContactWorld);
+  basketball.object.position.addScaledVector(basketballCarryDelta, 0.22);
+
+  updateBasketballCarryContactTargets(basketball);
+  setArmPoseToWorldTargetForAvatar(avatar, avatar.rightArmPivot, basketballRightContactWorld);
+  setArmPoseToWorldTargetForAvatar(avatar, avatar.leftArmPivot, basketballLeftContactWorld);
+
+  basketball.object.rotation.copy(basketballCarryEuler);
+  basketball.heldPosition.copy(basketball.object.position);
+  updateBasketballInteractionPoint(basketball);
+}
+
 function registerSeat(
   center,
   rotation,
@@ -16341,38 +16430,25 @@ function resetBasketballToWorldPosition(
   return true;
 }
 
-function getBasketballHoldPosition(target = new THREE.Vector3()) {
-  if (state.walkView === "firstPerson") {
-    getLookDirection(playerState.yaw, clamp(playerState.pitch * 0.45, -0.18, 0.26), basketballHoldForward);
-    basketballHoldRight.set(-basketballHoldForward.z, 0, basketballHoldForward.x).normalize();
-    return target
-      .copy(playerState.position)
-      .addScaledVector(basketballHoldForward, TOY_BASKETBALL_HOLD_FORWARD_FIRST_PERSON)
-      .addScaledVector(basketballHoldRight, TOY_BASKETBALL_HOLD_SIDE_FIRST_PERSON)
-      .setY(playerState.position.y + TOY_BASKETBALL_HOLD_VERTICAL_FIRST_PERSON);
-  }
-
-  getFlatLookDirection(playerState.facingYaw, basketballHoldForward);
-  basketballHoldRight.set(-basketballHoldForward.z, 0, basketballHoldForward.x).normalize();
-  return target
-    .copy(playerState.position)
-    .addScaledVector(basketballHoldForward, TOY_BASKETBALL_HOLD_FORWARD_THIRD_PERSON)
-    .addScaledVector(basketballHoldRight, TOY_BASKETBALL_HOLD_SIDE_THIRD_PERSON)
-    .setY(TOY_BASKETBALL_HOLD_HEIGHT_THIRD_PERSON);
-}
-
 function updateCarriedBasketballPlacement() {
   const basketball = state.carriedBasketball;
   if (!basketball || basketball.carrierClientId !== multiplayerClientId) {
     return;
   }
 
-  getBasketballHoldPosition(basketballHoldPosition);
-  basketball.object.position.copy(basketballHoldPosition);
-  basketball.heldPosition.copy(basketball.object.position);
-  basketball.object.rotateOnWorldAxis(basketballHoldSpinAxis, 0.045);
-  basketball.object.rotation.y += 0.02;
-  updateBasketballInteractionPoint(basketball);
+  if (state.walkView === "firstPerson") {
+    playerAvatar.root.rotation.y = playerState.yaw;
+    setBasketballCarryPoseForAvatar(basketball, playerAvatar, {
+      carryYaw: playerState.yaw,
+      firstPerson: true,
+    });
+    return;
+  }
+
+  setBasketballCarryPoseForAvatar(basketball, playerAvatar, {
+    carryYaw: playerAvatar.root.rotation.y,
+    firstPerson: false,
+  });
 }
 
 function getBasketballDropPosition(basketball, target = new THREE.Vector3()) {
@@ -19849,6 +19925,8 @@ function createPlayerAvatar({
     head,
     leftArmPivot,
     rightArmPivot,
+    leftHand,
+    rightHand,
     leftLegPivot,
     rightLegPivot,
     leftKneePivot,
