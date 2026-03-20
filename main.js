@@ -847,7 +847,6 @@ const camera = new THREE.PerspectiveCamera(
 camera.rotation.order = "YXZ";
 scene.add(camera);
 
-const overviewCameraPosition = new THREE.Vector3(9.5, 12.4, 12.8);
 const overviewTarget = new THREE.Vector3(0, 1.2, 0);
 const walkStartPlan = [other5Doorway.centerX, other5Doorway.wallZ + 1.4];
 const walkLookTargetPlan = [planCenter.x, HANGAR_REAR_PLAN_Z + 2];
@@ -20064,7 +20063,6 @@ function syncPlayerPresentation(delta, elapsedTime) {
   const isSeated = Boolean(state.seatedSeat);
   const showBodyInFirstPerson = isFirstPersonCamera && !isSeated;
   const avatarVisible =
-    state.mode === "overview" ||
     state.walkView === "thirdPerson" ||
     showBodyInFirstPerson ||
     isCircleTableCamera;
@@ -20243,8 +20241,6 @@ function animate() {
 
   if (state.mode === "walk") {
     updateWalkthrough(delta, elapsedTime);
-  } else if (state.mode === "overview") {
-    orbitControls.update();
   }
 
   slidingShelfCameras.forEach(({
@@ -20422,25 +20418,6 @@ function enterWalkMode(view = "firstPerson") {
   syncUi();
 }
 
-function enterOverviewMode(shouldUnlock = true) {
-  dropCarriedGoalpost(true);
-  dropCarriedBasketball(true);
-  clearMovementState();
-  standUpFromSeat();
-  playerState.motion = 0;
-  playerState.position.y = Math.max(playerState.position.y, PLAYER_HEIGHT);
-  state.velocityY = 0;
-  state.mode = "overview";
-  orbitControls.enabled = true;
-  camera.position.copy(overviewCameraPosition);
-  orbitControls.target.copy(overviewTarget);
-  orbitControls.update();
-  if (shouldUnlock) {
-    unlockPointer();
-  }
-  syncUi();
-}
-
 function syncUi() {
   const sessionActive = isSubscriberSessionReady() && !isSessionGateOpen();
   const gameplayHudVisible = state.mode !== "minigame" && sessionActive;
@@ -20451,7 +20428,7 @@ function syncUi() {
     setSuggestionBusy(false);
   }
 
-  labelGroup.visible = state.mode === "overview" && sessionActive;
+  labelGroup.visible = false;
   remotePlayerGroup.visible = sessionActive;
   if (subscribersHud) {
     subscribersHud.hidden = !gameplayHudVisible;
@@ -20720,9 +20697,6 @@ function onKeyDown(event) {
       if (state.mode === "walk" && !event.repeat) {
         enterWalkMode(state.walkView === "firstPerson" ? "thirdPerson" : "firstPerson");
       }
-      break;
-    case "KeyO":
-      enterOverviewMode();
       break;
     case "KeyE":
       if (state.mode === "walk" && isPointerLocked && !event.repeat) {
