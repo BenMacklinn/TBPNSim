@@ -16521,7 +16521,7 @@ function playBasketballScoreSound() {
     basketballScoreAudio.preload = "auto";
   }
   try {
-    basketballScoreAudio.currentTime = 0.5;
+    basketballScoreAudio.currentTime = 0.3;
   } catch {
     // ignore seek errors before metadata loads
   }
