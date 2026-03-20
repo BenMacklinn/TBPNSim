@@ -172,3 +172,25 @@ $$;
 
 revoke all on function public.claim_projector_refresh(integer) from public;
 grant execute on function public.claim_projector_refresh(integer) to service_role;
+
+alter table realtime.messages enable row level security;
+
+drop policy if exists "Authenticated users can receive TBPN realtime room traffic" on realtime.messages;
+create policy "Authenticated users can receive TBPN realtime room traffic"
+on realtime.messages
+for select
+to authenticated
+using (
+  (select realtime.topic()) like 'tbpn-sim:world:%'
+  and realtime.messages.extension in ('broadcast', 'presence')
+);
+
+drop policy if exists "Authenticated users can send TBPN realtime room traffic" on realtime.messages;
+create policy "Authenticated users can send TBPN realtime room traffic"
+on realtime.messages
+for insert
+to authenticated
+with check (
+  (select realtime.topic()) like 'tbpn-sim:world:%'
+  and realtime.messages.extension in ('broadcast', 'presence')
+);

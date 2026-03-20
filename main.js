@@ -689,6 +689,7 @@ let multiplayerTrackPromise = null;
 let multiplayerBroadcastPromise = null;
 let multiplayerWorldEventOrder = 0;
 let multiplayerWorldSyncRequestOrder = 0;
+let multiplayerLastErrorMessage = "";
 let projectorScreenMaterial = null;
 let projectorScreenMesh = null;
 let projectorFallbackTexture = null;
@@ -3083,10 +3084,12 @@ function syncMultiplayerHud() {
   const sessionActive = isSubscriberSessionReady() && !isSessionGateOpen();
   multiplayerHud.hidden = !sessionActive;
   if (!sessionActive) {
+    multiplayerHud.title = "";
     return;
   }
 
   multiplayerHud.dataset.state = multiplayerConnectionState;
+  multiplayerHud.title = multiplayerConnectionState === "error" ? multiplayerLastErrorMessage : "";
 
   if (multiplayerHudStatus) {
     multiplayerHudStatus.textContent =
@@ -3127,6 +3130,7 @@ function disconnectMultiplayerSession() {
   multiplayerWorldEventOrder = 0;
   multiplayerWorldSyncRequestOrder = 0;
   multiplayerConnectionState = "offline";
+  multiplayerLastErrorMessage = "";
 
   clearRemotePlayers();
 
@@ -3157,6 +3161,7 @@ function ensureMultiplayerSession() {
 
   const channel = supabase.channel(`${MULTIPLAYER_CHANNEL_PREFIX}:${multiplayerRoomId}`, {
     config: {
+      private: true,
       presence: {
         key: multiplayerPresenceKey,
       },
@@ -3201,7 +3206,7 @@ function ensureMultiplayerSession() {
     handleMultiplayerWorldSyncState(payload);
   });
 
-  channel.subscribe((status) => {
+  channel.subscribe((status, error) => {
     if (channel !== multiplayerChannel) {
       return;
     }
@@ -3209,6 +3214,7 @@ function ensureMultiplayerSession() {
     if (status === "SUBSCRIBED") {
       multiplayerSubscribed = true;
       multiplayerConnectionState = "connected";
+      multiplayerLastErrorMessage = "";
       syncMultiplayerHud();
       trackLocalMultiplayerPresence(true);
       scheduleLocalMultiplayerPresence(true);
@@ -3220,8 +3226,12 @@ function ensureMultiplayerSession() {
       multiplayerSubscribed = false;
       multiplayerPresenceTracked = false;
       multiplayerConnectionState = "error";
+      multiplayerLastErrorMessage = String(error?.message || error?.error || error || "").trim();
       multiplayerOnlineCount = 0;
       clearRemotePlayers();
+      if (multiplayerLastErrorMessage) {
+        console.error("Unable to subscribe to multiplayer realtime", multiplayerLastErrorMessage);
+      }
       syncMultiplayerHud();
       return;
     }
@@ -3230,6 +3240,7 @@ function ensureMultiplayerSession() {
       multiplayerSubscribed = false;
       multiplayerPresenceTracked = false;
       multiplayerConnectionState = "offline";
+      multiplayerLastErrorMessage = "";
       multiplayerOnlineCount = 0;
       clearRemotePlayers();
       syncMultiplayerHud();
@@ -3261,6 +3272,7 @@ function trackLocalMultiplayerPresence(force = false) {
     .catch((error) => {
       console.error("Unable to publish multiplayer presence", error);
       multiplayerConnectionState = "error";
+      multiplayerLastErrorMessage = String(error?.message || error || "").trim();
       syncMultiplayerHud();
     })
     .finally(() => {
@@ -3303,6 +3315,7 @@ function scheduleLocalMultiplayerPresence(force = false) {
     .catch((error) => {
       console.error("Unable to publish multiplayer presence", error);
       multiplayerConnectionState = "error";
+      multiplayerLastErrorMessage = String(error?.message || error || "").trim();
       syncMultiplayerHud();
     })
     .finally(() => {
