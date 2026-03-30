@@ -1028,6 +1028,7 @@ let bgMusic = null;
 let bgMusicMuted = false;
 
 function ensureBackgroundMusic() {
+  return; // background music disabled
   if (bgMusic) {
     return;
   }
@@ -1039,6 +1040,7 @@ function ensureBackgroundMusic() {
 }
 
 function syncBackgroundMusicPlayback() {
+  return; // background music disabled
   if (!bgMusic) {
     return;
   }
@@ -1057,14 +1059,11 @@ function syncBackgroundMusicPlayback() {
 }
 
 function startBackgroundMusic() {
-  ensureBackgroundMusic();
-  syncBackgroundMusicPlayback();
-  if (bgMusic.paused) {
-    bgMusic.play().catch(() => {});
-  }
+  return; // background music disabled
 }
 
 function toggleBgMusicMute() {
+  return; // background music disabled
   if (!bgMusic) return;
   bgMusicMuted = !bgMusicMuted;
   bgMusic.muted = bgMusicMuted;
@@ -20459,7 +20458,6 @@ function animate() {
   updateInteractiveBasketballs();
   scheduleLocalMultiplayerPresence();
   updateInteractionPrompt(elapsedTime);
-  syncBackgroundMusicPlayback();
   forecastFrenzy.update(delta, elapsedTime);
   tylerBoard.update(delta, elapsedTime);
   nikChiefOfStaff.update(delta, elapsedTime);
@@ -20829,11 +20827,7 @@ function onKeyDown(event) {
       break;
     case "KeyM":
       if (!event.repeat) {
-        if (bgMusic) {
-          toggleBgMusicMute();
-        } else {
-          startBackgroundMusic();
-        }
+        // background music disabled
       }
       break;
     case "KeyW":
