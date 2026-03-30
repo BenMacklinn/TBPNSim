@@ -1032,7 +1032,7 @@ function ensureBackgroundMusic() {
     return;
   }
   bgMusic = new Audio(new URL("./TBPNCountdownAudio.mp3", import.meta.url).href + "?v=1");
-  bgMusic.loop = true;
+  bgMusic.loop = false;
   bgMusic.volume = 0.12;
   bgMusic.preload = "auto";
   bgMusic.muted = bgMusicMuted;
