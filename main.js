@@ -645,6 +645,7 @@ const subscribersHudDelta = document.querySelector("#subscribersHudDelta");
 const multiplayerHud = document.querySelector("#multiplayerHud");
 const multiplayerHudStatus = document.querySelector("#multiplayerHudStatus");
 const multiplayerHudCount = document.querySelector("#multiplayerHudCount");
+const leaderboardPanel = document.querySelector("#leaderboardPanel");
 const leaderboardList = document.querySelector("#leaderboardList");
 const leaderboardEmpty = document.querySelector("#leaderboardEmpty");
 const leaderboardMeta = document.querySelector("#leaderboardMeta");
@@ -666,9 +667,11 @@ const sessionGateSubmitButton = document.querySelector("#sessionGateSubmit");
 let isHudHidden = false;
 function getHudElements() {
   return [
-    interactionPrompt,
     walkKeyHud,
+    walkNumKeys,
     walkLogoHud,
+    walkKey1,
+    walkKey2,
     seatedSpacePrompt,
     chatToggleButton,
     chatPanel,
@@ -684,6 +687,7 @@ function getHudElements() {
     brandonStackRoot,
     subscribersHud,
     multiplayerHud,
+    leaderboardPanel,
     leaderboardList,
     leaderboardEmpty,
     leaderboardMeta,
