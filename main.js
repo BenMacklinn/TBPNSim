@@ -662,6 +662,54 @@ const sessionGatePasswordInput = document.querySelector("#sessionGatePassword");
 const sessionGateLastPlayer = document.querySelector("#sessionGateLastPlayer");
 const sessionGateError = document.querySelector("#sessionGateError");
 const sessionGateSubmitButton = document.querySelector("#sessionGateSubmit");
+
+let isHudHidden = false;
+function getHudElements() {
+  return [
+    interactionPrompt,
+    walkKeyHud,
+    walkLogoHud,
+    seatedSpacePrompt,
+    chatToggleButton,
+    chatPanel,
+    suggestFeatureButton,
+    suggestFeaturePanel,
+    forecastFrenzyRoot,
+    tylerBoardRoot,
+    nikChiefOfStaffRoot,
+    maxClipperRoot,
+    johnSponsorReadRoot,
+    producerManRoot,
+    jordiHeroRoot,
+    brandonStackRoot,
+    subscribersHud,
+    multiplayerHud,
+    leaderboardList,
+    leaderboardEmpty,
+    leaderboardMeta,
+    authSignOutButton,
+    sessionGate,
+  ].filter(Boolean);
+}
+
+function setHudHidden(nextHidden) {
+  isHudHidden = Boolean(nextHidden);
+  for (const el of getHudElements()) {
+    if (isHudHidden) {
+      if (!el.dataset.prevDisplay) {
+        el.dataset.prevDisplay = el.style.display ?? "";
+      }
+      el.style.display = "none";
+    } else {
+      el.style.display = el.dataset.prevDisplay ?? "";
+      delete el.dataset.prevDisplay;
+    }
+  }
+}
+
+function toggleHudHidden() {
+  setHudHidden(!isHudHidden);
+}
 const SUBSCRIBERS_START = 50000;
 const SUBSCRIBERS_SWING = 1000;
 const SUBSCRIBERS_STEP = 50;
@@ -974,15 +1022,44 @@ let basketballScoreAudio = null;
 
 let bgMusic = null;
 let bgMusicMuted = false;
-function startBackgroundMusic() {
-  return; // Audio disabled for now
-  // if (bgMusic) return;
-  // bgMusic = new Audio(new URL("./Space Invaders - Space Invaders 4.mp3", import.meta.url).href + "?v=1");
-  // bgMusic.loop = true;
-  // bgMusic.volume = 0.1;
-  // bgMusic.currentTime = 10;
-  // bgMusic.play().catch(() => {});
+
+function ensureBackgroundMusic() {
+  if (bgMusic) {
+    return;
+  }
+  bgMusic = new Audio(new URL("./TBPNCountdownAudio.mp3", import.meta.url).href + "?v=1");
+  bgMusic.loop = true;
+  bgMusic.volume = 0.12;
+  bgMusic.preload = "auto";
+  bgMusic.muted = bgMusicMuted;
 }
+
+function syncBackgroundMusicPlayback() {
+  if (!bgMusic) {
+    return;
+  }
+  const shouldPlay =
+    state.mode === "walk" &&
+    !isProjectorFullscreenOpen() &&
+    !isSessionGateOpen() &&
+    !isProjectorStreamShowingInAudienceArea();
+  if (shouldPlay) {
+    if (bgMusic.paused) {
+      bgMusic.play().catch(() => {});
+    }
+  } else if (!bgMusic.paused) {
+    bgMusic.pause();
+  }
+}
+
+function startBackgroundMusic() {
+  ensureBackgroundMusic();
+  syncBackgroundMusicPlayback();
+  if (bgMusic.paused) {
+    bgMusic.play().catch(() => {});
+  }
+}
+
 function toggleBgMusicMute() {
   if (!bgMusic) return;
   bgMusicMuted = !bgMusicMuted;
@@ -1634,6 +1711,13 @@ function isPositionInsideProjectorViewingArea(worldPosition) {
 
 function getProjectorAudiencePosition() {
   return state.mode === "walk" ? playerState.position : camera.position;
+}
+
+function isProjectorStreamShowingInAudienceArea() {
+  return Boolean(
+    projectorPrimaryDisplay?.requestedVisible &&
+      isPositionInsideProjectorViewingArea(getProjectorAudiencePosition()),
+  );
 }
 
 function shouldProjectorDisplayBeAudible(display) {
@@ -20371,6 +20455,7 @@ function animate() {
   updateInteractiveBasketballs();
   scheduleLocalMultiplayerPresence();
   updateInteractionPrompt(elapsedTime);
+  syncBackgroundMusicPlayback();
   forecastFrenzy.update(delta, elapsedTime);
   tylerBoard.update(delta, elapsedTime);
   nikChiefOfStaff.update(delta, elapsedTime);
@@ -20675,6 +20760,12 @@ function maybeLockWalkthrough() {
 }
 
 function onKeyDown(event) {
+  if (event.code === "KeyH" && !event.repeat) {
+    event.preventDefault();
+    toggleHudHidden();
+    return;
+  }
+
   if (isProjectorFullscreenOpen()) {
     if (event.code === "Escape" || event.code === "KeyE") {
       event.preventDefault();
