@@ -18376,6 +18376,19 @@ function canOpenProjectorFullscreen() {
   return Boolean(display?.cssShell && (display.requestedVisible || currentSrc));
 }
 
+function isMinigameNpcInteraction(target) {
+  return [
+    "forecast",
+    "tylerBoard",
+    "nikChiefOfStaff",
+    "maxClipper",
+    "johnSponsorRead",
+    "producerMan",
+    "jordiHero",
+    "brandonStack",
+  ].includes(target?.type);
+}
+
 function getNearestInteraction() {
   return [
     ...interactiveDoors.map((door) => ({
@@ -18532,7 +18545,7 @@ function updateInteractionPrompt(elapsedTime) {
       Math.abs(nearestInteraction.target.targetAngle) > 0.2
         ? "Press E to Close Door"
         : "Press E to Open Door";
-    interactionPromptLine.textContent = nearestInteraction.target.name;
+    interactionPromptLine.textContent = "";
     setInteractionPromptCooldown(false);
   } else if (nearestInteraction.type === "seat") {
     interactionPromptEyebrow.textContent = "Seat";
@@ -18566,7 +18579,9 @@ function updateInteractionPrompt(elapsedTime) {
     setInteractionPromptCooldown(false);
   } else {
     interactionPromptEyebrow.textContent = nearestInteraction.target.promptEyebrow;
-    interactionPromptTitle.textContent = nearestInteraction.target.promptTitle;
+    interactionPromptTitle.textContent = isMinigameNpcInteraction(nearestInteraction.target)
+      ? `Press E to play as ${nearestInteraction.target.promptEyebrow}`
+      : nearestInteraction.target.promptTitle;
     interactionPromptLine.textContent =
       nearestInteraction.target.lines[
         Math.floor(elapsedTime / 3.2) % nearestInteraction.target.lines.length
