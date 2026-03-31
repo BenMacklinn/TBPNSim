@@ -261,12 +261,14 @@ const TOY_BASKETBALL_HEATSEEK_END = 0.94;
 const TOY_BASKETBALL_HEATSEEK_STRENGTH = 0.38;
 const MULTIPLAYER_TRACK_INTERVAL_MS = 120;
 const MULTIPLAYER_IDLE_REFRESH_MS = 2500;
+const MULTIPLAYER_RECONNECT_DELAY_MS = 1500;
 const MULTIPLAYER_CHANNEL_PREFIX = "tbpn-sim:world";
 const MULTIPLAYER_BROADCAST_EVENT = "pose";
 const MULTIPLAYER_CHAT_EVENT = "chat-message";
 const MULTIPLAYER_WORLD_EVENT = "world-event";
 const MULTIPLAYER_WORLD_SYNC_REQUEST_EVENT = "world-sync-request";
 const MULTIPLAYER_WORLD_SYNC_STATE_EVENT = "world-sync-state";
+const MULTIPLAYER_CLIENT_ID_STORAGE_KEY = "tbpn-sim:multiplayer-client-id";
 const REMOTE_PLAYER_POSITION_LERP = 9;
 const REMOTE_PLAYER_TURN_LERP = 10;
 const REMOTE_PLAYER_MOTION_LERP = 8;
@@ -765,6 +767,7 @@ let multiplayerBroadcastPromise = null;
 let multiplayerWorldEventOrder = 0;
 let multiplayerWorldSyncRequestOrder = 0;
 let multiplayerLastErrorMessage = "";
+let multiplayerReconnectTimer = 0;
 let projectorScreenMaterial = null;
 let projectorScreenMesh = null;
 let projectorFallbackTexture = null;
@@ -783,8 +786,7 @@ let projectorAudioAudible = false;
 let projectorAudioSuppressedByMinigame = false;
 let projectorLastKnownVideoId = "";
 const multiplayerRoomId = getMultiplayerRoomId();
-const multiplayerClientId =
-  globalThis.crypto?.randomUUID?.() ?? `client-${Math.random().toString(36).slice(2, 10)}`;
+const multiplayerClientId = getOrCreateSessionMultiplayerClientId();
 const remotePlayers = new Map();
 const chatMessageTimeFormatter = new Intl.DateTimeFormat(undefined, {
   hour: "numeric",
@@ -2580,6 +2582,25 @@ function getMultiplayerRoomId() {
   return normalizedRoomId || "main";
 }
 
+function createMultiplayerClientId() {
+  return globalThis.crypto?.randomUUID?.() ?? `client-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getOrCreateSessionMultiplayerClientId() {
+  try {
+    const storedClientId = window.sessionStorage?.getItem(MULTIPLAYER_CLIENT_ID_STORAGE_KEY) ?? "";
+    if (storedClientId) {
+      return storedClientId;
+    }
+
+    const nextClientId = createMultiplayerClientId();
+    window.sessionStorage?.setItem(MULTIPLAYER_CLIENT_ID_STORAGE_KEY, nextClientId);
+    return nextClientId;
+  } catch (_error) {
+    return createMultiplayerClientId();
+  }
+}
+
 function roundMultiplayerNumber(value, precision = 1000) {
   const normalizedValue = Number(value);
   if (!Number.isFinite(normalizedValue)) {
@@ -3020,16 +3041,39 @@ function collectMultiplayerPresenceSnapshots() {
     .filter(Boolean);
 }
 
+function isLocalMultiplayerSnapshot(snapshot, remoteKey = snapshot?.presenceKey || "") {
+  if (!snapshot || typeof snapshot !== "object") {
+    return false;
+  }
+
+  if (remoteKey && remoteKey === multiplayerPresenceKey) {
+    return true;
+  }
+
+  if (snapshot.clientId && snapshot.clientId === multiplayerClientId) {
+    return true;
+  }
+
+  // Hide stale same-account presences after reloads instead of rendering a ghost avatar.
+  return Boolean(
+    activeSubscriberProfileKey &&
+    snapshot.profileId &&
+    snapshot.profileId === activeSubscriberProfileKey
+  );
+}
+
 function syncRemotePlayersFromPresence() {
   const snapshots = collectMultiplayerPresenceSnapshots();
   const nextKeys = new Set();
+  let remoteCount = 0;
 
   snapshots.forEach(({ key, snapshot }) => {
     const remoteKey = snapshot.presenceKey || key;
-    if (remoteKey === multiplayerPresenceKey || snapshot.clientId === multiplayerClientId) {
+    if (isLocalMultiplayerSnapshot(snapshot, remoteKey)) {
       return;
     }
 
+    remoteCount += 1;
     nextKeys.add(remoteKey);
 
     const existingEntry = remotePlayers.get(remoteKey);
@@ -3049,7 +3093,7 @@ function syncRemotePlayersFromPresence() {
     }
   });
 
-  multiplayerOnlineCount = snapshots.length;
+  multiplayerOnlineCount = (isSubscriberSessionReady() ? 1 : 0) + remoteCount;
   syncMultiplayerHud();
 }
 
@@ -3062,8 +3106,7 @@ function handleMultiplayerBroadcast(payload) {
   const remoteKey =
     snapshot.presenceKey ||
     (snapshot.profileId && snapshot.clientId ? `${snapshot.profileId}:${snapshot.clientId}` : snapshot.clientId);
-  const isLocalSnapshot =
-    !remoteKey || remoteKey === multiplayerPresenceKey || snapshot.clientId === multiplayerClientId;
+  const isLocalSnapshot = !remoteKey || isLocalMultiplayerSnapshot(snapshot, remoteKey);
 
   if (snapshot.carriedGoalpost && !isLocalSnapshot) {
     applySharedGoalpostState({
@@ -3629,9 +3672,39 @@ function syncMultiplayerHud() {
   renderChatStageTexture();
 }
 
+function clearMultiplayerReconnectTimer() {
+  if (!multiplayerReconnectTimer) {
+    return;
+  }
+
+  clearTimeout(multiplayerReconnectTimer);
+  multiplayerReconnectTimer = 0;
+}
+
+function scheduleMultiplayerReconnect(reason = "") {
+  if (!isSubscriberSessionReady() || multiplayerReconnectTimer) {
+    return;
+  }
+
+  if (reason) {
+    console.warn(`Reconnecting multiplayer after ${reason}.`);
+  }
+
+  multiplayerReconnectTimer = window.setTimeout(() => {
+    multiplayerReconnectTimer = 0;
+    if (!isSubscriberSessionReady()) {
+      return;
+    }
+
+    disconnectMultiplayerSession();
+    ensureMultiplayerSession();
+  }, MULTIPLAYER_RECONNECT_DELAY_MS);
+}
+
 function disconnectMultiplayerSession() {
   const channel = multiplayerChannel;
 
+  clearMultiplayerReconnectTimer();
   multiplayerChannel = null;
   multiplayerSubscribed = false;
   multiplayerPresenceTracked = false;
@@ -3652,6 +3725,9 @@ function disconnectMultiplayerSession() {
   });
 
   if (channel) {
+    if (typeof channel.untrack === "function") {
+      void channel.untrack().catch(() => {});
+    }
     void supabase.removeChannel(channel);
   }
 
@@ -3729,6 +3805,7 @@ function ensureMultiplayerSession() {
     }
 
     if (status === "SUBSCRIBED") {
+      clearMultiplayerReconnectTimer();
       multiplayerSubscribed = true;
       multiplayerConnectionState = "connected";
       multiplayerLastErrorMessage = "";
@@ -3750,6 +3827,7 @@ function ensureMultiplayerSession() {
         console.error("Unable to subscribe to multiplayer realtime", multiplayerLastErrorMessage);
       }
       syncMultiplayerHud();
+      scheduleMultiplayerReconnect(status === "TIMED_OUT" ? "a realtime timeout" : "a channel error");
       return;
     }
 
@@ -3761,6 +3839,7 @@ function ensureMultiplayerSession() {
       multiplayerOnlineCount = 0;
       clearRemotePlayers();
       syncMultiplayerHud();
+      scheduleMultiplayerReconnect("the realtime channel closing unexpectedly");
     }
   });
 }
@@ -3791,6 +3870,7 @@ function trackLocalMultiplayerPresence(force = false) {
       multiplayerConnectionState = "error";
       multiplayerLastErrorMessage = String(error?.message || error || "").trim();
       syncMultiplayerHud();
+      scheduleMultiplayerReconnect("a failed presence publish");
     })
     .finally(() => {
       multiplayerTrackPromise = null;
@@ -3834,6 +3914,7 @@ function scheduleLocalMultiplayerPresence(force = false) {
       multiplayerConnectionState = "error";
       multiplayerLastErrorMessage = String(error?.message || error || "").trim();
       syncMultiplayerHud();
+      scheduleMultiplayerReconnect("a failed pose broadcast");
     })
     .finally(() => {
       multiplayerBroadcastPromise = null;
@@ -4833,6 +4914,17 @@ window.addEventListener("resize", onResize);
 window.addEventListener("keydown", onKeyDown);
 window.addEventListener("keyup", onKeyUp);
 window.addEventListener("blur", clearMovementState);
+window.addEventListener("online", () => {
+  if (isSubscriberSessionReady() && multiplayerConnectionState !== "connected") {
+    scheduleMultiplayerReconnect("the browser coming back online");
+  }
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && isSubscriberSessionReady() && multiplayerConnectionState !== "connected") {
+    scheduleMultiplayerReconnect("the tab becoming active again");
+  }
+});
+window.addEventListener("pagehide", disconnectMultiplayerSession);
 window.addEventListener("beforeunload", disconnectMultiplayerSession);
 window.addEventListener("beforeunload", stopChatHistoryPolling);
 window.addEventListener("beforeunload", stopProjectorStatusPolling);
@@ -16337,6 +16429,21 @@ function clampThirdPersonCameraDistanceToAccessibleArea(origin, direction, desir
     return desiredDistance;
   }
 
+  const frontDoorCameraWallZ = toWorldPoint([0, FRONT_EDGE_Z]).z;
+  const frontDoorCameraWallXMin = toWorldPoint([OTHER5_LEFT, 0]).x;
+  const frontDoorCameraWallXMax = toWorldPoint([OTHER5_RIGHT, 0]).x;
+  let maxDistance = desiredDistance;
+
+  if (Math.abs(direction.z) > 0.0001) {
+    const wallHitDistance = (frontDoorCameraWallZ - origin.z) / direction.z;
+    if (wallHitDistance > 0 && wallHitDistance <= maxDistance) {
+      const wallHitX = origin.x + direction.x * wallHitDistance;
+      if (wallHitX >= frontDoorCameraWallXMin && wallHitX <= frontDoorCameraWallXMax) {
+        maxDistance = Math.max(THIRD_PERSON_CAMERA_MIN_DISTANCE, wallHitDistance - 0.04);
+      }
+    }
+  }
+
   const isDistanceAccessible = (distance) => {
     thirdPersonCameraAccessibilityProbe.set(
       origin.x + direction.x * distance,
@@ -16345,12 +16452,16 @@ function clampThirdPersonCameraDistanceToAccessibleArea(origin, direction, desir
     return isPointInAccessibleArea(thirdPersonCameraAccessibilityProbe);
   };
 
-  if (isDistanceAccessible(desiredDistance)) {
-    return desiredDistance;
+  if (maxDistance <= THIRD_PERSON_CAMERA_MIN_DISTANCE) {
+    return maxDistance;
+  }
+
+  if (isDistanceAccessible(maxDistance)) {
+    return maxDistance;
   }
 
   let low = 0;
-  let high = desiredDistance;
+  let high = maxDistance;
   for (let i = 0; i < 12; i += 1) {
     const mid = (low + high) / 2;
     if (isDistanceAccessible(mid)) {
