@@ -748,6 +748,10 @@ let chatHistoryPollTimer = null;
 let chatStageCanvas = null;
 let chatStageContext = null;
 let chatStageTexture = null;
+let subscribersHudCountRaf = 0;
+let subscribersHudDisplayedCount = 0;
+let subscribersHudLastProfileKey = "__boot__";
+let subscribersHudLastTargetCount = null;
 let multiplayerConnectionState = "offline";
 let multiplayerOnlineCount = 0;
 let multiplayerPresenceKey = "";
@@ -2152,6 +2156,58 @@ function formatSignedSubscriberCount(value) {
     return "0";
   }
   return `${rounded > 0 ? "+" : "-"}${Math.abs(rounded).toLocaleString()}`;
+}
+
+function stopSubscribersHudCountAnimation() {
+  if (subscribersHudCountRaf) {
+    cancelAnimationFrame(subscribersHudCountRaf);
+    subscribersHudCountRaf = 0;
+  }
+}
+
+function setSubscribersHudCountDisplay(value) {
+  const safeValue = Math.max(0, Math.round(value));
+  subscribersHudDisplayedCount = safeValue;
+  if (subscribersHudCount) {
+    subscribersHudCount.textContent = formatSubscriberCount(safeValue);
+  }
+}
+
+function animateSubscribersHudCount(targetValue, { from = null, durationMs = 1600 } = {}) {
+  if (!subscribersHudCount) {
+    return;
+  }
+
+  const target = Math.max(0, Math.round(targetValue));
+  const start = Math.max(
+    0,
+    Math.round(from == null ? subscribersHudDisplayedCount : from),
+  );
+
+  if (start === target) {
+    stopSubscribersHudCountAnimation();
+    setSubscribersHudCountDisplay(target);
+    return;
+  }
+
+  stopSubscribersHudCountAnimation();
+
+  const startAt = performance.now();
+  const tick = (now) => {
+    const elapsed = now - startAt;
+    const t = clamp(durationMs <= 0 ? 1 : elapsed / durationMs, 0, 1);
+    const eased = 1 - Math.pow(1 - t, 3);
+    const nextValue = Math.round(start + (target - start) * eased);
+    setSubscribersHudCountDisplay(nextValue);
+    if (t < 1) {
+      subscribersHudCountRaf = requestAnimationFrame(tick);
+    } else {
+      subscribersHudCountRaf = 0;
+      setSubscribersHudCountDisplay(target);
+    }
+  };
+
+  subscribersHudCountRaf = requestAnimationFrame(tick);
 }
 
 function sanitizeSubscriberName(name) {
@@ -3796,6 +3852,10 @@ function clearActiveSubscriberProfile() {
   subscriberCount = SUBSCRIBERS_START;
   lastSubscriberDelta = 0;
   hasSubscriberOutcome = false;
+  subscribersHudLastProfileKey = "__signed_out__";
+  subscribersHudLastTargetCount = null;
+  stopSubscribersHudCountAnimation();
+  setSubscribersHudCountDisplay(0);
   stopChatHistoryPolling();
   resetChatHistory();
 }
@@ -4354,6 +4414,9 @@ function renderLeaderboard() {
 
 function syncSubscribersHud() {
   const activeRank = leaderboardEntries.findIndex((entry) => entry.id === activeSubscriberProfileKey);
+  const sessionReady = isSubscriberSessionReady();
+  const nextTargetCount = sessionReady ? subscriberCount : 0;
+  const profileKeyForAnimation = sessionReady ? activeSubscriberProfileKey || "__session__" : "__signed_out__";
 
   if (subscribersHudPlayer) {
     subscribersHudPlayer.textContent = activeSubscriberName || "No player selected";
@@ -4367,7 +4430,25 @@ function syncSubscribersHud() {
         : "Login required";
   }
   if (subscribersHudCount) {
-    subscribersHudCount.textContent = formatSubscriberCount(subscriberCount);
+    const profileChanged = profileKeyForAnimation !== subscribersHudLastProfileKey;
+    const targetChanged = nextTargetCount !== subscribersHudLastTargetCount;
+
+    if (!sessionReady) {
+      subscribersHudLastProfileKey = profileKeyForAnimation;
+      subscribersHudLastTargetCount = nextTargetCount;
+      stopSubscribersHudCountAnimation();
+      setSubscribersHudCountDisplay(0);
+    } else if (profileChanged) {
+      subscribersHudLastProfileKey = profileKeyForAnimation;
+      subscribersHudLastTargetCount = nextTargetCount;
+      setSubscribersHudCountDisplay(0);
+      animateSubscribersHudCount(nextTargetCount, { from: 0, durationMs: 2400 });
+    } else if (targetChanged) {
+      subscribersHudLastTargetCount = nextTargetCount;
+      animateSubscribersHudCount(nextTargetCount, { from: subscribersHudDisplayedCount, durationMs: 1400 });
+    } else {
+      setSubscribersHudCountDisplay(nextTargetCount);
+    }
   }
   if (subscribersHudDelta) {
     subscribersHudDelta.textContent =
@@ -13990,36 +14071,6 @@ function addHangarBasketballHoop() {
   placePlanObject(fridge, fridgeCenter, 0, Math.PI / 2, furnishingGroup);
   pushPlanRectCollider(fridgeCenter, 0.72, 0.68, 0, PLAYER_RADIUS * 0.08);
 
-  const toyBasketball = new THREE.Group();
-  const shell = new THREE.Mesh(
-    new THREE.SphereGeometry(TOY_BASKETBALL_RADIUS, 28, 22),
-    new THREE.MeshStandardMaterial({
-      color: "#d96a1f",
-      roughness: 0.82,
-      metalness: 0.05,
-    }),
-  );
-  toyBasketball.add(shell);
-
-  const seamMaterial = new THREE.MeshStandardMaterial({
-    color: "#1b120d",
-    roughness: 0.92,
-    metalness: 0.02,
-  });
-  const seamOne = new THREE.Mesh(
-    new THREE.TorusGeometry(TOY_BASKETBALL_RADIUS * 0.98, 0.006, 8, 42),
-    seamMaterial,
-  );
-  toyBasketball.add(seamOne);
-  const seamTwo = seamOne.clone();
-  seamTwo.rotation.x = Math.PI / 2;
-  toyBasketball.add(seamTwo);
-
-  enableShadows(toyBasketball);
-  const toyBasketballSpawn = toWorldPoint([hoopCenter[0] - 0.64, hoopCenter[1] - 0.14]);
-  toyBasketball.position.set(toyBasketballSpawn.x, TOY_BASKETBALL_RADIUS, toyBasketballSpawn.z);
-  furnishingGroup.add(toyBasketball);
-  registerInteractiveBasketball(toyBasketball);
 }
 
 function addFootballGoalpost(center, rotation = 0) {
