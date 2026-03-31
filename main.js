@@ -263,6 +263,8 @@ const MULTIPLAYER_TRACK_INTERVAL_MS = 60;
 const MULTIPLAYER_IDLE_REFRESH_MS = 1500;
 const MULTIPLAYER_RECONNECT_DELAY_MS = 1500;
 const MULTIPLAYER_MAX_CONSECUTIVE_PUBLISH_FAILURES = 3;
+const MULTIPLAYER_PRESENCE_POLL_INTERVAL_MS = 1000;
+const MULTIPLAYER_REMOTE_STALE_AFTER_MS = 8000;
 const MULTIPLAYER_CHANNEL_PREFIX = "tbpn-sim:world";
 const MULTIPLAYER_BROADCAST_EVENT = "pose";
 const MULTIPLAYER_CHAT_EVENT = "chat-message";
@@ -770,6 +772,7 @@ let multiplayerWorldSyncRequestOrder = 0;
 let multiplayerLastErrorMessage = "";
 let multiplayerReconnectTimer = 0;
 let multiplayerConsecutivePublishFailures = 0;
+let multiplayerPresencePollTimer = 0;
 let projectorScreenMaterial = null;
 let projectorScreenMesh = null;
 let projectorFallbackTexture = null;
@@ -2961,6 +2964,7 @@ function createRemotePlayerEntry(key, snapshot) {
     targetFacingYaw: 0,
     targetMotion: 0,
     lastSnapshotUpdatedAt: 0,
+    lastSeenAt: 0,
     pose: "idle",
     seatSurfaceHeight: DEFAULT_SEAT_SURFACE_HEIGHT,
     animationPhase: (hashString(key) % 628) / 100,
@@ -2994,6 +2998,7 @@ function applyRemotePlayerSnapshot(entry, snapshot, snapImmediately = false) {
   entry.carriedGoalpostId = snapshot.carriedGoalpost?.id ?? "";
   entry.seatSurfaceHeight = snapshot.seatSurfaceHeight ?? DEFAULT_SEAT_SURFACE_HEIGHT;
   entry.lastSnapshotUpdatedAt = Math.max(entry.lastSnapshotUpdatedAt || 0, nextUpdatedAt);
+  entry.lastSeenAt = Math.max(entry.lastSeenAt || 0, nextUpdatedAt || Date.now());
   entry.targetPosition.set(
     snapshot.x,
     Math.max(0, snapshot.y - PLAYER_HEIGHT),
@@ -3690,6 +3695,53 @@ function clearMultiplayerReconnectTimer() {
   multiplayerReconnectTimer = 0;
 }
 
+function clearMultiplayerPresencePollTimer() {
+  if (!multiplayerPresencePollTimer) {
+    return;
+  }
+
+  clearInterval(multiplayerPresencePollTimer);
+  multiplayerPresencePollTimer = 0;
+}
+
+function pruneStaleRemotePlayers(now = Date.now()) {
+  let removedAny = false;
+  Array.from(remotePlayers.entries()).forEach(([key, entry]) => {
+    if (now - (entry?.lastSeenAt || 0) <= MULTIPLAYER_REMOTE_STALE_AFTER_MS) {
+      return;
+    }
+
+    releaseSharedObjectsForClient(entry?.clientId ?? "");
+    removeRemotePlayer(key);
+    removedAny = true;
+  });
+
+  if (removedAny) {
+    multiplayerOnlineCount = (isSubscriberSessionReady() ? 1 : 0) + remotePlayers.size;
+    syncMultiplayerHud();
+  }
+}
+
+function startMultiplayerPresencePolling() {
+  clearMultiplayerPresencePollTimer();
+  syncRemotePlayersFromPresence();
+  pruneStaleRemotePlayers();
+  if (!multiplayerPresenceTracked) {
+    trackLocalMultiplayerPresence();
+  }
+  multiplayerPresencePollTimer = window.setInterval(() => {
+    if (!multiplayerChannel || !multiplayerSubscribed || !isSubscriberSessionReady()) {
+      return;
+    }
+
+    syncRemotePlayersFromPresence();
+    pruneStaleRemotePlayers();
+    if (!multiplayerPresenceTracked) {
+      trackLocalMultiplayerPresence();
+    }
+  }, MULTIPLAYER_PRESENCE_POLL_INTERVAL_MS);
+}
+
 function scheduleMultiplayerReconnect(reason = "") {
   if (!isSubscriberSessionReady() || multiplayerReconnectTimer) {
     return;
@@ -3714,6 +3766,7 @@ function disconnectMultiplayerSession() {
   const channel = multiplayerChannel;
 
   clearMultiplayerReconnectTimer();
+  clearMultiplayerPresencePollTimer();
   multiplayerChannel = null;
   multiplayerSubscribed = false;
   multiplayerPresenceTracked = false;
@@ -3816,6 +3869,7 @@ function ensureMultiplayerSession() {
 
     if (status === "SUBSCRIBED") {
       clearMultiplayerReconnectTimer();
+      startMultiplayerPresencePolling();
       multiplayerSubscribed = true;
       multiplayerConnectionState = "connected";
       multiplayerLastErrorMessage = "";
