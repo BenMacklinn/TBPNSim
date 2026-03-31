@@ -20863,12 +20863,6 @@ function maybeLockWalkthrough() {
 }
 
 function onKeyDown(event) {
-  if (event.code === "KeyH" && !event.repeat) {
-    event.preventDefault();
-    toggleHudHidden();
-    return;
-  }
-
   if (isProjectorFullscreenOpen()) {
     if (event.code === "Escape" || event.code === "KeyE") {
       event.preventDefault();
