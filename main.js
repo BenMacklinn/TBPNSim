@@ -2440,13 +2440,6 @@ function syncChatPanelMeta() {
   chatPanelMeta.textContent = `${multiplayerRoomId} room`;
 }
 
-function isChatPinnedToBottom() {
-  if (!chatMessagesRoot) {
-    return false;
-  }
-  return chatMessagesRoot.scrollHeight - chatMessagesRoot.scrollTop - chatMessagesRoot.clientHeight < 28;
-}
-
 function scrollChatToBottom() {
   if (!chatMessagesRoot) {
     return;
@@ -2523,7 +2516,6 @@ function ingestChatMessages(messages, { stickToBottom = false } = {}) {
     return false;
   }
 
-  const shouldStick = stickToBottom || isChatPinnedToBottom();
   const nextMessages = new Map(chatMessages.map((entry) => [entry.id, entry]));
   let changed = false;
 
@@ -2555,7 +2547,7 @@ function ingestChatMessages(messages, { stickToBottom = false } = {}) {
     .sort((left, right) => left.id - right.id)
     .slice(-CHAT_HISTORY_LIMIT);
   chatLatestMessageId = chatMessages[chatMessages.length - 1]?.id ?? 0;
-  renderChatMessages({ stickToBottom: shouldStick });
+  renderChatMessages({ stickToBottom: true });
   return true;
 }
 
@@ -4019,7 +4011,7 @@ async function loadInitialChatHistory() {
       .filter(Boolean)
       .reverse();
     chatHistoryLoaded = true;
-    ingestChatMessages(normalized);
+    ingestChatMessages(normalized, { stickToBottom: true });
   })();
 
   try {
