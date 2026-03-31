@@ -259,9 +259,10 @@ const TOY_BASKETBALL_SHOT_ARC_DISTANCE_FACTOR = 0.16;
 const TOY_BASKETBALL_HEATSEEK_START = 0.16;
 const TOY_BASKETBALL_HEATSEEK_END = 0.94;
 const TOY_BASKETBALL_HEATSEEK_STRENGTH = 0.38;
-const MULTIPLAYER_TRACK_INTERVAL_MS = 120;
-const MULTIPLAYER_IDLE_REFRESH_MS = 2500;
+const MULTIPLAYER_TRACK_INTERVAL_MS = 60;
+const MULTIPLAYER_IDLE_REFRESH_MS = 1500;
 const MULTIPLAYER_RECONNECT_DELAY_MS = 1500;
+const MULTIPLAYER_MAX_CONSECUTIVE_PUBLISH_FAILURES = 3;
 const MULTIPLAYER_CHANNEL_PREFIX = "tbpn-sim:world";
 const MULTIPLAYER_BROADCAST_EVENT = "pose";
 const MULTIPLAYER_CHAT_EVENT = "chat-message";
@@ -269,9 +270,9 @@ const MULTIPLAYER_WORLD_EVENT = "world-event";
 const MULTIPLAYER_WORLD_SYNC_REQUEST_EVENT = "world-sync-request";
 const MULTIPLAYER_WORLD_SYNC_STATE_EVENT = "world-sync-state";
 const MULTIPLAYER_CLIENT_ID_STORAGE_KEY = "tbpn-sim:multiplayer-client-id";
-const REMOTE_PLAYER_POSITION_LERP = 9;
-const REMOTE_PLAYER_TURN_LERP = 10;
-const REMOTE_PLAYER_MOTION_LERP = 8;
+const REMOTE_PLAYER_POSITION_LERP = 16;
+const REMOTE_PLAYER_TURN_LERP = 14;
+const REMOTE_PLAYER_MOTION_LERP = 12;
 const DEFAULT_SEAT_SURFACE_HEIGHT = 0.52;
 
 const gltfLoader = new GLTFLoader();
@@ -768,6 +769,7 @@ let multiplayerWorldEventOrder = 0;
 let multiplayerWorldSyncRequestOrder = 0;
 let multiplayerLastErrorMessage = "";
 let multiplayerReconnectTimer = 0;
+let multiplayerConsecutivePublishFailures = 0;
 let projectorScreenMaterial = null;
 let projectorScreenMesh = null;
 let projectorFallbackTexture = null;
@@ -2958,6 +2960,7 @@ function createRemotePlayerEntry(key, snapshot) {
     targetPitch: 0,
     targetFacingYaw: 0,
     targetMotion: 0,
+    lastSnapshotUpdatedAt: 0,
     pose: "idle",
     seatSurfaceHeight: DEFAULT_SEAT_SURFACE_HEIGHT,
     animationPhase: (hashString(key) % 628) / 100,
@@ -2969,6 +2972,11 @@ function createRemotePlayerEntry(key, snapshot) {
 }
 
 function applyRemotePlayerSnapshot(entry, snapshot, snapImmediately = false) {
+  const nextUpdatedAt = Number.isFinite(snapshot.updatedAt) ? snapshot.updatedAt : 0;
+  if (!snapImmediately && nextUpdatedAt && entry.lastSnapshotUpdatedAt > nextUpdatedAt) {
+    return;
+  }
+
   if (entry.displayName !== snapshot.displayName || entry.subscriberCount !== (snapshot.subscriberCount ?? 0)) {
     entry.displayName = snapshot.displayName;
     entry.subscriberCount = snapshot.subscriberCount ?? 0;
@@ -2985,6 +2993,7 @@ function applyRemotePlayerSnapshot(entry, snapshot, snapImmediately = false) {
   entry.pose = snapshot.pose;
   entry.carriedGoalpostId = snapshot.carriedGoalpost?.id ?? "";
   entry.seatSurfaceHeight = snapshot.seatSurfaceHeight ?? DEFAULT_SEAT_SURFACE_HEIGHT;
+  entry.lastSnapshotUpdatedAt = Math.max(entry.lastSnapshotUpdatedAt || 0, nextUpdatedAt);
   entry.targetPosition.set(
     snapshot.x,
     Math.max(0, snapshot.y - PLAYER_HEIGHT),
@@ -3718,6 +3727,7 @@ function disconnectMultiplayerSession() {
   multiplayerWorldSyncRequestOrder = 0;
   multiplayerConnectionState = "offline";
   multiplayerLastErrorMessage = "";
+  multiplayerConsecutivePublishFailures = 0;
 
   clearRemotePlayers();
   interactiveBasketballs.forEach((basketball) => {
@@ -3809,6 +3819,7 @@ function ensureMultiplayerSession() {
       multiplayerSubscribed = true;
       multiplayerConnectionState = "connected";
       multiplayerLastErrorMessage = "";
+      multiplayerConsecutivePublishFailures = 0;
       syncMultiplayerHud();
       trackLocalMultiplayerPresence(true);
       scheduleLocalMultiplayerPresence(true);
@@ -3821,6 +3832,7 @@ function ensureMultiplayerSession() {
       multiplayerPresenceTracked = false;
       multiplayerConnectionState = "error";
       multiplayerLastErrorMessage = String(error?.message || error?.error || error || "").trim();
+      multiplayerConsecutivePublishFailures = 0;
       multiplayerOnlineCount = 0;
       clearRemotePlayers();
       if (multiplayerLastErrorMessage) {
@@ -3836,12 +3848,34 @@ function ensureMultiplayerSession() {
       multiplayerPresenceTracked = false;
       multiplayerConnectionState = "offline";
       multiplayerLastErrorMessage = "";
+      multiplayerConsecutivePublishFailures = 0;
       multiplayerOnlineCount = 0;
       clearRemotePlayers();
       syncMultiplayerHud();
       scheduleMultiplayerReconnect("the realtime channel closing unexpectedly");
     }
   });
+}
+
+function handleMultiplayerPublishFailure(channel, error, reconnectReason) {
+  if (channel !== multiplayerChannel) {
+    return;
+  }
+
+  multiplayerConsecutivePublishFailures += 1;
+  const errorMessage = String(error?.message || error || "").trim();
+  if (multiplayerConsecutivePublishFailures < MULTIPLAYER_MAX_CONSECUTIVE_PUBLISH_FAILURES) {
+    if (errorMessage) {
+      console.warn("Transient multiplayer publish failure", errorMessage);
+    }
+    return;
+  }
+
+  console.error("Unable to publish multiplayer presence", error);
+  multiplayerConnectionState = "error";
+  multiplayerLastErrorMessage = errorMessage;
+  syncMultiplayerHud();
+  scheduleMultiplayerReconnect(reconnectReason);
 }
 
 function trackLocalMultiplayerPresence(force = false) {
@@ -3857,24 +3891,29 @@ function trackLocalMultiplayerPresence(force = false) {
     return;
   }
 
-  multiplayerTrackPromise = multiplayerChannel.track(buildLocalMultiplayerPresenceSnapshot())
+  const channel = multiplayerChannel;
+  const trackPromise = channel.track(buildLocalMultiplayerPresenceSnapshot())
     .then(() => {
+      if (channel !== multiplayerChannel) {
+        return;
+      }
+
       multiplayerPresenceTracked = true;
+      multiplayerConsecutivePublishFailures = 0;
       if (multiplayerConnectionState !== "connected") {
         multiplayerConnectionState = "connected";
         syncMultiplayerHud();
       }
     })
     .catch((error) => {
-      console.error("Unable to publish multiplayer presence", error);
-      multiplayerConnectionState = "error";
-      multiplayerLastErrorMessage = String(error?.message || error || "").trim();
-      syncMultiplayerHud();
-      scheduleMultiplayerReconnect("a failed presence publish");
+      handleMultiplayerPublishFailure(channel, error, "a failed presence publish");
     })
     .finally(() => {
-      multiplayerTrackPromise = null;
+      if (multiplayerTrackPromise === trackPromise) {
+        multiplayerTrackPromise = null;
+      }
     });
+  multiplayerTrackPromise = trackPromise;
 }
 
 function scheduleLocalMultiplayerPresence(force = false) {
@@ -3896,29 +3935,34 @@ function scheduleLocalMultiplayerPresence(force = false) {
     return;
   }
 
-  multiplayerBroadcastPromise = multiplayerChannel.send({
+  const channel = multiplayerChannel;
+  const broadcastPromise = channel.send({
     type: "broadcast",
     event: MULTIPLAYER_BROADCAST_EVENT,
     payload,
   })
     .then(() => {
+      if (channel !== multiplayerChannel) {
+        return;
+      }
+
       multiplayerLastTrackAt = performance.now();
       multiplayerLastPayloadSignature = payloadSignature;
+      multiplayerConsecutivePublishFailures = 0;
       if (multiplayerConnectionState !== "connected") {
         multiplayerConnectionState = "connected";
         syncMultiplayerHud();
       }
     })
     .catch((error) => {
-      console.error("Unable to publish multiplayer presence", error);
-      multiplayerConnectionState = "error";
-      multiplayerLastErrorMessage = String(error?.message || error || "").trim();
-      syncMultiplayerHud();
-      scheduleMultiplayerReconnect("a failed pose broadcast");
+      handleMultiplayerPublishFailure(channel, error, "a failed pose broadcast");
     })
     .finally(() => {
-      multiplayerBroadcastPromise = null;
+      if (multiplayerBroadcastPromise === broadcastPromise) {
+        multiplayerBroadcastPromise = null;
+      }
     });
+  multiplayerBroadcastPromise = broadcastPromise;
 }
 
 function clearActiveSubscriberProfile() {
