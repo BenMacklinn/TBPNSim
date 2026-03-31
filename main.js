@@ -978,6 +978,8 @@ const basketballShotControlPoint = new THREE.Vector3();
 const basketballShotLift = new THREE.Vector3(0, 1, 0);
 const basketballShotDeflectDirection = new THREE.Vector3();
 const basketballShotLandingPosition = new THREE.Vector3();
+const interactionFacingDirection = new THREE.Vector3();
+const interactionTargetOffset = new THREE.Vector3();
 const projectorDisplayCameraPosition = new THREE.Vector3();
 const projectorDisplayTargetPoint = new THREE.Vector3();
 const projectorDisplayRayDirection = new THREE.Vector3();
@@ -18401,6 +18403,29 @@ function isMinigameNpcInteraction(target) {
   ].includes(target?.type);
 }
 
+function getInteractionFacingYaw() {
+  return state.walkView === "firstPerson" ? playerState.yaw : playerState.facingYaw;
+}
+
+function isInteractionInFrontOfPlayer(target) {
+  if (!target?.interactionPoint) {
+    return false;
+  }
+
+  interactionTargetOffset
+    .copy(target.interactionPoint)
+    .sub(playerState.position)
+    .setY(0);
+
+  if (interactionTargetOffset.lengthSq() <= 0.0001) {
+    return true;
+  }
+
+  interactionTargetOffset.normalize();
+  getFlatLookDirection(getInteractionFacingYaw(), interactionFacingDirection);
+  return interactionFacingDirection.dot(interactionTargetOffset) >= 0.35;
+}
+
 function getNearestInteraction() {
   return [
     ...interactiveDoors.map((door) => ({
@@ -18450,7 +18475,7 @@ function getNearestInteraction() {
       if (type === "seat" && target.occupiedByClientId && target.occupiedByClientId !== multiplayerClientId) {
         return false;
       }
-      return distance <= getInteractionDistanceLimit(type, target);
+      return distance <= getInteractionDistanceLimit(type, target) && isInteractionInFrontOfPlayer(target);
     })
     .sort((a, b) => a.distance - b.distance)[0];
 }
