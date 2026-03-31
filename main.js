@@ -18676,6 +18676,8 @@ function startProducerMan(npc) {
   standUpFromSeat();
   playerState.motion = 0;
   state.mode = "minigame";
+  projectorAudioSuppressedByMinigame = true;
+  updateProjectorAudioZone();
   unlockPointer();
   hideInteractionPrompt();
   const line =
@@ -18689,7 +18691,9 @@ function startProducerMan(npc) {
 }
 
 function handleProducerManExit() {
+  projectorAudioSuppressedByMinigame = false;
   state.mode = "walk";
+  updateProjectorAudioZone();
   syncUi();
 }
 
