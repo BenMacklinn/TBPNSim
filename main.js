@@ -6047,6 +6047,8 @@ function buildFurnishings() {
     shirtColor: "#f3efe6",
   });
   if (weatherman) {
+    weatherman.root.scale.set(0.95, 1, 0.97);
+    weatherman.torso.scale.set(0.96, 1, 0.94);
     weatherman.head.rotation.y = Math.PI / 6;
     weatherman.leftArmPivot.rotation.x = -0.22;
     weatherman.leftArmPivot.rotation.y = -0.18;
