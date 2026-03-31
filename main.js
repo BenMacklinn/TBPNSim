@@ -980,6 +980,7 @@ const basketballShotDeflectDirection = new THREE.Vector3();
 const basketballShotLandingPosition = new THREE.Vector3();
 const interactionFacingDirection = new THREE.Vector3();
 const interactionTargetOffset = new THREE.Vector3();
+const thirdPersonCameraAccessibilityProbe = new THREE.Vector2();
 const projectorDisplayCameraPosition = new THREE.Vector3();
 const projectorDisplayTargetPoint = new THREE.Vector3();
 const projectorDisplayRayDirection = new THREE.Vector3();
@@ -16331,6 +16332,37 @@ function isPointInAccessibleArea(point) {
   return true;
 }
 
+function clampThirdPersonCameraDistanceToAccessibleArea(origin, direction, desiredDistance) {
+  if (desiredDistance <= THIRD_PERSON_CAMERA_MIN_DISTANCE) {
+    return desiredDistance;
+  }
+
+  const isDistanceAccessible = (distance) => {
+    thirdPersonCameraAccessibilityProbe.set(
+      origin.x + direction.x * distance,
+      origin.z + direction.z * distance,
+    );
+    return isPointInAccessibleArea(thirdPersonCameraAccessibilityProbe);
+  };
+
+  if (isDistanceAccessible(desiredDistance)) {
+    return desiredDistance;
+  }
+
+  let low = 0;
+  let high = desiredDistance;
+  for (let i = 0; i < 12; i += 1) {
+    const mid = (low + high) / 2;
+    if (isDistanceAccessible(mid)) {
+      low = mid;
+    } else {
+      high = mid;
+    }
+  }
+
+  return Math.max(THIRD_PERSON_CAMERA_MIN_DISTANCE, low - 0.04);
+}
+
 function isGoalpostPlacementValid(goalpost, position, rotation = goalpost.object.rotation.y) {
   const rect = buildGoalpostColliderRect(position, rotation);
   const samplePoints = [
@@ -20481,9 +20513,14 @@ function syncPlayerPresentation(delta, elapsedTime) {
     const unobstructedDistance = obstruction
       ? Math.min(idealDistance, obstruction.distance - CAMERA_COLLISION_PADDING)
       : idealDistance;
-    const resolvedDistance = obstruction
+    const collisionResolvedDistance = obstruction
       ? Math.max(THIRD_PERSON_CAMERA_MIN_DISTANCE, unobstructedDistance)
       : idealDistance;
+    const resolvedDistance = clampThirdPersonCameraDistanceToAccessibleArea(
+      cameraLookTarget,
+      cameraOffsetVector,
+      collisionResolvedDistance,
+    );
     camera.position.copy(cameraLookTarget).addScaledVector(cameraOffsetVector, resolvedDistance);
   } else {
     camera.position.copy(desiredCameraPosition);
