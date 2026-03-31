@@ -6198,7 +6198,11 @@ function registerChatNpc(character, {
 function registerTylerBoardNpc(character, {
   promptEyebrow = "Tyler",
   promptTitle = "Press E to play",
-  lines = ["One of five easy boards loads each run.", "Slide pieces along their orientation to free the red tweet.", "Wide and tall tweet blocks move as one piece."],
+  lines = [
+    "I laid the board out for you. Find the clean path.",
+    "Move the blocks with some intention and get the red post out.",
+    "If you jam the lane, do not look at me. Reset and solve it.",
+  ],
   promptRadius = 1.8,
 } = {}) {
   if (!character) {
@@ -6228,9 +6232,9 @@ function registerJohnSponsorNpc(character, {
   promptEyebrow = "John",
   promptTitle = "Press E to read sponsors",
   lines = [
-    "Five sponsor reads. Type them clean before the timer expires.",
-    "Gemini, Shopify, Restream, Phantom. The sponsor stack changes every run.",
-    "Accuracy times speed. Every typo shows up immediately.",
+    "Copy is live. Hit the read clean and do not freelance.",
+    "The sponsor pays for precision, not improv. Respect the script.",
+    "If you stumble on the ad read, everybody feels it.",
   ],
   promptRadius = 1.8,
 } = {}) {
@@ -6261,9 +6265,9 @@ function registerNikChiefOfStaffNpc(character, {
   promptEyebrow = "Nik",
   promptTitle = "Press E to staff the calendar",
   lines = [
-    "The week is packed. Clear it out.",
-    "Chief of Staff mode is live.",
-    "Do not let the calendar overflow.",
+    "My calendar is underwater. Fix it before the week disappears.",
+    "Protect the priorities, kill the fluff, and keep us moving.",
+    "If two meetings can be one meeting, I expect one meeting.",
   ],
   promptRadius = 1.8,
 } = {}) {
@@ -6294,9 +6298,9 @@ function registerMaxClipperNpc(character, {
   promptEyebrow = "Max",
   promptTitle = "Press E to clip",
   lines = [
-    "Catch the X-worthy moments before they vanish.",
-    "You're clipping live. Don't miss the bangers.",
-    "The dead air is bait. Grab the real moments.",
+    "The timeline wants heat. Find the moment before it is gone.",
+    "Do not clip the setup. Clip the punchline.",
+    "If chat would repost it, that is the one you grab.",
   ],
   promptRadius = 1.8,
 } = {}) {
@@ -6327,9 +6331,9 @@ function registerProducerManNpc(character, {
   promptEyebrow = "Production",
   promptTitle = "Press E to cut cameras",
   lines = [
-    "Run Camera Cut and switch the hangar shots live.",
-    "Host, guest, wide, reaction. Land the cut on the cue.",
-    "Wrong timing makes the show look cheap.",
+    "Stay with me on the switch. I want clean cuts and no panic.",
+    "Give me host, guest, wide, reaction. Land it on the beat.",
+    "A bad cut makes the whole show feel cheap. Do not give me one.",
   ],
   promptRadius = 1.8,
 } = {}) {
@@ -6360,9 +6364,9 @@ function registerJordiHeroNpc(character, {
   promptEyebrow = "Jordi",
   promptTitle = "Press E to jam",
   lines = [
-    "Four lanes. Every lane fires a soundboard MP3.",
-    "Hit the strike line clean or the combo dies.",
-    "It is Guitar Hero, but the guitar is fully broken.",
+    "Load the drops and keep the chaos musical.",
+    "Hit the lane on time or the whole bit falls apart.",
+    "This is not rhythm for rhythm's sake. This is soundboard warfare.",
   ],
   promptRadius = 1.8,
 } = {}) {
@@ -6393,9 +6397,9 @@ function registerBrandonStackNpc(character, {
   promptEyebrow = "Brandon",
   promptTitle = "Press E to stack the post",
   lines = [
-    "Stack the Substack slices clean and keep the article full-width.",
-    "Drop the moving strip on time or the draft gets chopped down.",
-    "This is a timing game. No typing. Just publish or miss.",
+    "I need this post stacked clean and ready to publish.",
+    "Keep the layout tight. Crooked sections make the whole thing feel rushed.",
+    "Do not butcher the article on the landing. Give me a clean build.",
   ],
   promptRadius = 1.8,
 } = {}) {
@@ -6439,7 +6443,11 @@ function registerGong(center, discParts, promptRadius = 1.8) {
 function registerForecastNpc(character, {
   promptEyebrow = "Weather Desk",
   promptTitle = "Press E to Forecast",
-  lines = ["Match the term."],
+  lines = [
+    "Step up to the desk and call the weather clean.",
+    "Read the sky, trust the board, and do not force it.",
+    "If you cannot name the pattern, you are not ready for air.",
+  ],
   promptRadius = 2.25,
 } = {}) {
   if (!character) {
@@ -11517,9 +11525,9 @@ function addP3aStorageShelf() {
       promptEyebrow: "Scott",
       promptTitle: "Press E to cut cameras",
       lines: [
-        "Scott needs the live switches clean.",
-        "Use the real hangar camera angles and cut on time.",
-        "The episode only feels premium if the timing is sharp.",
+        "Keep my switches clean and keep the room moving.",
+        "Hit the right angle on cue so the segment breathes.",
+        "If the timing is sloppy, the whole episode feels cheap.",
       ],
     });
   }
@@ -11551,9 +11559,9 @@ function addP3aStorageShelf() {
       promptEyebrow: "Nik",
       promptTitle: "Press E to staff the calendar",
       lines: [
-        "The calendar is a mess.",
-        "Try Chief of Staff.",
-        "Keep the week from collapsing.",
+        "The calendar is a disaster. I need order fast.",
+        "Protect the important stuff and clear the junk.",
+        "Keep the week from collapsing on my watch.",
       ],
     });
   }
@@ -11594,9 +11602,9 @@ function addP3aStorageShelf() {
       promptEyebrow: "Max",
       promptTitle: "Press E to clip",
       lines: [
-        "The live feed is moving fast.",
-        "Clip the good stuff before it disappears.",
-        "Postable moments only.",
+        "The feed is moving fast. Grab the part people will repost.",
+        "Find the good moment before it gets buried.",
+        "I do not want filler. I want the clip.",
       ],
     });
   }
@@ -11639,9 +11647,9 @@ function addP3aStorageShelf() {
       promptEyebrow: "Brandon",
       promptTitle: "Press E to stack the post",
       lines: [
-        "Stack the Substack slices clean and keep Brandon's page publishable.",
-        "Every drop trims the article if you're off. Miss it and the draft dies.",
-        "No typing. Just timing. Build the cleanest Brandon post you can.",
+        "Stack this post clean and make it look intentional.",
+        "Miss the drop and the article gets carved up.",
+        "No typing, no excuses, just a clean publishable layout.",
       ],
     });
   }
@@ -12196,9 +12204,9 @@ function addP3aStorageShelf() {
             promptEyebrow: "John",
             promptTitle: "Press E to read sponsors",
             lines: [
-              "Five sponsor reads. Type them before the timer expires.",
-              "Gemini, Shopify, MongoDB, Figma, Kalshi. The deck changes every run.",
-              "Accuracy times speed. Keep the sponsors happy.",
+              "Five reads, clean copy, no ad-libbing.",
+              "The sponsor stack changes, but the standard does not.",
+              "Keep the sponsors happy and the words exact.",
             ],
           });
         }
@@ -12247,7 +12255,11 @@ function addP3aStorageShelf() {
     registerTylerBoardNpc(tyler, {
       promptEyebrow: "Tyler",
       promptTitle: "Press E to play",
-      lines: ["Try the puzzle on my board.", "Each run picks one of five easy starts.", "Click the side you want a piece to slide toward."],
+      lines: [
+        "I put a board together. Solve it clean.",
+        "Find the path for the red post and do not trap yourself.",
+        "Every move should make the exit easier, not harder.",
+      ],
     });
   }
   addRug([4.2, 13.5], [2.4, 1.6], "#3c3f43", Math.PI);
@@ -12289,8 +12301,8 @@ function addP3aStorageShelf() {
       promptEyebrow: "Ben",
       promptTitle: "Press E to cut cameras",
       lines: [
-        "Ben wants the switcher to feel locked in.",
-        "Hit host, guest, wide, and producer reaction at the right beat.",
+        "I want the switcher tight. No wasted cuts.",
+        "Hit host, guest, wide, and reaction right on the beat.",
         "Late cuts turn a clean segment into cable access.",
       ],
     });
@@ -12318,9 +12330,9 @@ function addP3aStorageShelf() {
       promptEyebrow: "Michael",
       promptTitle: "Press E to cut cameras",
       lines: [
-        "Michael is calling a live multicam show.",
-        "Punch the right hangar shot inside the timing window.",
-        "Keep the broadcast smooth or eat the bad cut.",
+        "I am calling a live show here. Stay sharp on the switch.",
+        "Punch the right hangar shot inside the window.",
+        "Keep the broadcast smooth and do not hand me a bad cut.",
       ],
     });
   }
