@@ -59,6 +59,7 @@ type YoutubePlaylistItemsResponse = {
 
 type YoutubeVideosResponse = {
   items?: Array<{
+    id?: string;
     snippet?: {
       liveBroadcastContent?: string;
     };
@@ -176,13 +177,10 @@ function shouldRunLiveCheck(state: ProjectorStateRow, nowMs: number, minutesSinc
 }
 
 function shouldRunArchiveCheck(state: ProjectorStateRow, nowMs: number) {
-  const replayVideoId = trimString(state.replay_video_id);
-
-  if (!replayVideoId) {
-    return nowMs - parseTimestamp(state.last_archive_check_at) >= REPLAY_BOOTSTRAP_CHECK_INTERVAL_MS;
-  }
-
-  return false;
+  const intervalMs = trimString(state.replay_video_id)
+    ? ARCHIVE_CHECK_INTERVAL_MS
+    : REPLAY_BOOTSTRAP_CHECK_INTERVAL_MS;
+  return nowMs - parseTimestamp(state.last_archive_check_at) >= intervalMs;
 }
 
 function needsReplayClockRefresh(state: ProjectorStateRow) {
@@ -426,6 +424,35 @@ async function fetchLatestCompletedBroadcastVideoId(youtubeApiKey: string, chann
   return trimString(item?.id?.videoId);
 }
 
+async function fetchLatestUploadedCompletedBroadcastVideoId(
+  youtubeApiKey: string,
+  channelId: string,
+  uploadsPlaylistId = "",
+) {
+  const playlistId = trimString(uploadsPlaylistId) || (await fetchUploadsPlaylistId(youtubeApiKey, channelId));
+  if (!playlistId) {
+    return { videoId: "", uploadsPlaylistId: "" };
+  }
+
+  const videoIds = await fetchRecentUploadVideoIds(youtubeApiKey, playlistId);
+  if (!videoIds.length) {
+    return { videoId: "", uploadsPlaylistId: playlistId };
+  }
+
+  const videosUrl = new URL("https://www.googleapis.com/youtube/v3/videos");
+  videosUrl.searchParams.set("part", "liveStreamingDetails");
+  videosUrl.searchParams.set("id", videoIds.join(","));
+  videosUrl.searchParams.set("key", youtubeApiKey);
+
+  const payload = await fetchYoutubeJson<YoutubeVideosResponse>(videosUrl);
+  const items = Array.isArray(payload.items) ? payload.items : [];
+  const completedBroadcast = items.find((item) => trimString(item?.liveStreamingDetails?.actualEndTime));
+  return {
+    videoId: trimString(completedBroadcast?.id),
+    uploadsPlaylistId: playlistId,
+  };
+}
+
 async function fetchUploadsPlaylistId(youtubeApiKey: string, channelId: string) {
   const channelsUrl = new URL("https://www.googleapis.com/youtube/v3/channels");
   channelsUrl.searchParams.set("part", "contentDetails");
@@ -582,15 +609,32 @@ async function refreshProjectorState(params: {
     nextState.last_archive_check_at = isoNow();
     updated = true;
     try {
-      if (!trimString(nextState.replay_video_id)) {
-        const replayVideoId = await fetchLatestCompletedBroadcastVideoId(youtubeApiKey, channelId);
-        if (replayVideoId) {
-          nextState.replay_video_id = replayVideoId;
-          nextState.pending_archive_video_id = "";
-          nextState.mode = nextState.mode === "live" ? "live" : "replay";
-          nextState.last_source = "youtube.completed_bootstrap";
-          nextState.last_error = "";
-        }
+      const currentReplayVideoId = trimString(nextState.replay_video_id);
+      const latestUpload = await fetchLatestUploadedCompletedBroadcastVideoId(
+        youtubeApiKey,
+        channelId,
+        nextState.uploads_playlist_id,
+      );
+      if (latestUpload.uploadsPlaylistId) {
+        nextState.uploads_playlist_id = latestUpload.uploadsPlaylistId;
+      }
+
+      const replayVideoId =
+        latestUpload.videoId ||
+        (!currentReplayVideoId ? await fetchLatestCompletedBroadcastVideoId(youtubeApiKey, channelId) : "");
+      if (replayVideoId && replayVideoId !== currentReplayVideoId) {
+        nextState.replay_video_id = replayVideoId;
+        nextState.replay_clock_video_id = "";
+        nextState.replay_started_at = null;
+        nextState.replay_duration_seconds = null;
+        nextState.pending_archive_video_id = "";
+        nextState.mode = nextState.mode === "live" ? "live" : "replay";
+        nextState.last_source = currentReplayVideoId
+          ? "youtube.uploads_archive_refresh"
+          : latestUpload.videoId
+          ? "youtube.uploads_archive_bootstrap"
+          : "youtube.completed_bootstrap";
+        nextState.last_error = "";
       }
     } catch (error) {
       nextState.last_error = error instanceof Error ? error.message : String(error);
