@@ -2254,7 +2254,7 @@ button:active {
   place-items: center;
   min-height: 0;
   padding: 18px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .tyler-board__board {
@@ -2301,6 +2301,50 @@ button:active {
     0 0 0 2px rgba(239, 95, 92, 0.18),
     0 0 24px rgba(255, 178, 77, 0.22);
   font-weight: 700;
+}
+
+.tyler-board__exit-marker {
+  position: absolute;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transform: translateY(-50%);
+  padding: 8px 10px;
+  border: 1px solid rgba(238, 84, 84, 0.52);
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 242, 232, 0.94)),
+    #fff7f1;
+  color: #a22c28;
+  font-family: "Courier New", "Lucida Console", monospace;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  box-shadow:
+    0 10px 24px rgba(111, 39, 31, 0.16),
+    0 0 0 3px rgba(255, 108, 92, 0.12);
+  pointer-events: none;
+}
+
+.tyler-board__exit-marker-arrow {
+  width: 0;
+  height: 0;
+  border-top: 8px solid transparent;
+  border-bottom: 8px solid transparent;
+}
+
+.tyler-board__exit-marker[data-side="right"] .tyler-board__exit-marker-arrow {
+  border-left: 13px solid #ef5f5c;
+}
+
+.tyler-board__exit-marker[data-side="left"] {
+  flex-direction: row-reverse;
+}
+
+.tyler-board__exit-marker[data-side="left"] .tyler-board__exit-marker-arrow {
+  border-right: 13px solid #ef5f5c;
 }
 
 .tyler-board__tile {

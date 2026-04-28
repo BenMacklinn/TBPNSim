@@ -487,12 +487,18 @@ class SlidingPuzzleRenderer {
     this.exitButton = root.querySelector("#tylerBoardExitButton");
     this.replayButton = root.querySelector("#tylerBoardReplayButton");
     this.resultExitButton = root.querySelector("#tylerBoardResultExitButton");
+    this.frameElement = this.boardElement?.closest(".tyler-board__frame");
 
     this.cellsLayer = document.createElement("div");
     this.cellsLayer.className = "tyler-board__cells";
     this.tilesLayer = document.createElement("div");
     this.tilesLayer.className = "tyler-board__tiles";
     this.boardElement.append(this.cellsLayer, this.tilesLayer);
+    this.exitMarkerElement = document.createElement("div");
+    this.exitMarkerElement.className = "tyler-board__exit-marker";
+    this.exitMarkerElement.setAttribute("aria-hidden", "true");
+    this.exitMarkerElement.innerHTML = '<span class="tyler-board__exit-marker-label">EXIT</span><span class="tyler-board__exit-marker-arrow"></span>';
+    this.frameElement?.append(this.exitMarkerElement);
     this.cellElements = [];
     this.pointerSession = null;
     this.cellStep = 0;
@@ -774,6 +780,23 @@ class SlidingPuzzleRenderer {
     this.boardElement.style.setProperty("--board-gap", `${gap}px`);
     this.boardElement.style.setProperty("--board-cell-size", `${cellSize}px`);
     this.cellStep = cellSize + gap;
+
+    if (this.exitMarkerElement && this.frameElement) {
+      const frameRect = this.frameElement.getBoundingClientRect();
+      const exit = this.lastSnapshot.exit;
+      const exitCenterY = boardRect.top - frameRect.top + exit.y * (cellSize + gap) + cellSize / 2;
+      const exitSide = exit.x >= gridSize - 1 ? "right" : exit.x <= 0 ? "left" : "right";
+
+      this.exitMarkerElement.dataset.side = exitSide;
+      this.exitMarkerElement.style.top = `${exitCenterY}px`;
+      if (exitSide === "right") {
+        this.exitMarkerElement.style.left = `${boardRect.right - frameRect.left + 12}px`;
+        this.exitMarkerElement.style.right = "";
+      } else {
+        this.exitMarkerElement.style.right = `${frameRect.right - boardRect.left + 12}px`;
+        this.exitMarkerElement.style.left = "";
+      }
+    }
 
     this.tileElements.forEach((element) => {
       const x = Number(element.style.getPropertyValue("--tile-grid-x"));
