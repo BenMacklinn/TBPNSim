@@ -157,7 +157,7 @@ function buildResult(stats, reason) {
     rank = "Viral Cutter";
   }
   if (stats.score >= 3300 && stats.goodHits >= 21 && stats.engagement >= 70) {
-    rank = "Max's Clip God";
+    rank = "Jackson's Clip God";
   }
 
   return {

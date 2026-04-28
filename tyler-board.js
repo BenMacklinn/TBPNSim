@@ -26,7 +26,7 @@ const TILE_META = {
   B: { accent: "blue", author: "Mina", handle: "@minacodes", body: "Short vertical post stack.", tag: "1x2" },
   C: { accent: "yellow", author: "Ari", handle: "@ariwrites", body: "Another vertical lane blocker.", tag: "1x3" },
   D: { accent: "red", author: "Claude", handle: "@claudeai", body: "Wide reply card.", tag: "2x1" },
-  E: { accent: "green", author: "Max", handle: "@max", body: "Short tweet block.", tag: "2x1" },
+  E: { accent: "green", author: "Jackson", handle: "@jackson", body: "Short tweet block.", tag: "2x1" },
   F: { accent: "blue", author: "Riley", handle: "@rileyloop", body: "Feature-size wide card.", tag: "3x1" },
   G: { accent: "yellow", author: "Bea", handle: "@beawave", body: "Narrow lane blocker.", tag: "1x2" },
   H: { accent: "green", author: "Lena", handle: "@lenaops", body: "Bottom row card.", tag: "2x1" },

@@ -1,230 +1,48 @@
-const ROUND_SIZE = 5;
+const ROUND_SIZE = 4;
 const READ_WRAP_DELAY = 0.95;
-const MIN_READ_TIME = 6.5;
-const MAX_READ_TIME = 9.5;
+const MIN_READ_TIME = 4.5;
+const MAX_READ_TIME = 6.2;
+const READ_START_BUFFER = 2.1;
+const READ_SECONDS_PER_CHARACTER = 1 / 8.5;
 const INTRO_FADE_OUT = 1.8;
 const INTRO_HOLD = 0.5;
 const INTRO_FADE_IN = 1.8;
 const DEFAULT_INTRO_LINE =
-  "Five sponsor reads. Accuracy times speed. Keep the copy clean before the clock burns out.";
+  "Four TBPN phrases. Accuracy times speed. Keep the copy clean before the clock burns out.";
 const DEFAULT_ACCENT = "#69d6ff";
 
 const SPONSOR_POOL = [
   {
-    id: "gemini",
-    brand: "Gemini",
-    label: "Gemini (Google)",
-    note: "Chat with Gemini to start writing, planning, learning, and more with Google AI.",
-    script: "Gemini by Google. Supercharge your creativity and productivity. Get started.",
+    id: "ultradome",
+    brand: "TBPN Ultradome",
+    label: "TBPN Ultradome",
+    note: "Open the show with the arena call.",
+    script: "Live from the TBPN Ultradome",
     accent: "#4f7cff",
   },
   {
-    id: "shopify",
-    brand: "Shopify",
-    label: "Shopify",
-    note: "The complete commerce platform to sell online or in person.",
-    script: "Shopify. The complete commerce platform to sell online or in person. Get started today.",
+    id: "temple",
+    brand: "Technology",
+    label: "The Temple of Technology",
+    note: "Say the technology line exactly.",
+    script: "The Temple of Technology",
     accent: "#58c072",
   },
   {
-    id: "cognition",
-    brand: "Cognition",
-    label: "Cognition",
-    note: "Maker of Devin, the first AI software engineer, and an applied AI lab for software agents.",
-    script: "Cognition. Maker of Devin, the first AI software engineer. Get started today.",
+    id: "fortress",
+    brand: "Finance",
+    label: "The Fortress of Finance",
+    note: "Keep the finance line clean.",
+    script: "The Fortress of Finance",
     accent: "#ff8d5c",
   },
   {
-    id: "elevenlabs",
-    brand: "ElevenLabs",
-    label: "ElevenLabs",
-    note: "AI voice models for developers, creators, and enterprises.",
-    script: "ElevenLabs. AI voice tools for developers, creators, and enterprises. Start today.",
+    id: "capital",
+    brand: "Capital",
+    label: "The Capital of Capital",
+    note: "Close with the capital line.",
+    script: "The Capital of Capital",
     accent: "#a06bff",
-  },
-  {
-    id: "turbopuffer",
-    brand: "Turbopuffer",
-    label: "Turbopuffer",
-    note: "Serverless vector and full-text search built on object storage.",
-    script: "Turbopuffer. Search every byte with serverless vector and full-text search. Get started here.",
-    accent: "#58d8bf",
-  },
-  {
-    id: "restream",
-    brand: "Restream",
-    label: "Restream",
-    note: "One live stream to 30+ destinations for creators who multistream everywhere.",
-    script: "Restream. One live stream to 30+ destinations. Sign up for free.",
-    accent: "#6d8cff",
-  },
-  {
-    id: "crowdstrike",
-    brand: "CrowdStrike",
-    label: "CrowdStrike",
-    note: "Secure endpoints, cloud workloads, identity, and data to stop breaches.",
-    script: "CrowdStrike. Secure endpoints, cloud workloads, identity, and data. Get started today.",
-    accent: "#ff6d78",
-  },
-  {
-    id: "mongodb",
-    brand: "MongoDB",
-    label: "MongoDB",
-    note: "The database for dynamic, demanding software across text, video, audio, and time series.",
-    script: "MongoDB. The database for dynamic, demanding software. Start here.",
-    accent: "#3ecf82",
-  },
-  {
-    id: "nyse",
-    brand: "NYSE",
-    label: "New York Stock Exchange",
-    note: "Capital markets happen here on the trading platform that sets the standard.",
-    script: "The New York Stock Exchange. Capital markets happen here. Learn more.",
-    accent: "#58b5ff",
-  },
-  {
-    id: "applovin",
-    brand: "AppLovin",
-    label: "AppLovin (Axon)",
-    note: "The AI-powered advertising platform connecting businesses with ideal customers.",
-    script: "AppLovin Axon. The AI-powered advertising platform. Get started.",
-    accent: "#ff9d57",
-  },
-  {
-    id: "phantom",
-    brand: "Phantom",
-    label: "Phantom",
-    note: "A simple multichain wallet built to make crypto accessible for everyone.",
-    script: "Phantom. The crypto wallet that will take you places. Start today.",
-    accent: "#9a7cff",
-  },
-  {
-    id: "labelbox",
-    brand: "Labelbox",
-    label: "Labelbox",
-    note: "The data factory for AI teams building and staffing modern data operations.",
-    script: "Labelbox. The data factory for AI teams. Get started today.",
-    accent: "#4ec5ff",
-  },
-  {
-    id: "console",
-    brand: "Console",
-    label: "Console",
-    note: "Helping IT teams get to Inbox Zero by understanding company-specific processes and policies.",
-    script: "Console. Helping IT teams get to Inbox Zero. Start here.",
-    accent: "#ffd166",
-  },
-  {
-    id: "kalshi",
-    brand: "Kalshi",
-    label: "Kalshi",
-    note: "A regulated exchange and prediction market for real-world events.",
-    script: "Kalshi. Trade the future on a regulated prediction market. Start here.",
-    accent: "#ff7d4d",
-  },
-  {
-    id: "linear",
-    brand: "Linear",
-    label: "Linear",
-    note: "The system for modern software development across issues, projects, and roadmaps.",
-    script: "Linear. The system for modern software development. Start building.",
-    accent: "#78c5ff",
-  },
-  {
-    id: "figma",
-    brand: "Figma",
-    label: "Figma",
-    note: "Design, prototype, develop, and collect feedback in a single connected platform.",
-    script: "Figma. Design, prototype, develop, and collect feedback in one place. Get started.",
-    accent: "#ff8a65",
-  },
-  {
-    id: "cisco",
-    brand: "Cisco",
-    label: "Cisco",
-    note: "Critical infrastructure for the AI era at the edge where data originates.",
-    script: "Cisco. Critical infrastructure for the AI era. Learn more.",
-    accent: "#2fbfff",
-  },
-  {
-    id: "vanta",
-    brand: "Vanta",
-    label: "Vanta",
-    note: "Get compliant fast with AI and automation for evidence, monitoring, and vendor risk.",
-    script: "Vanta. Get compliant fast with AI and automation. Get started.",
-    accent: "#a5d36b",
-  },
-  {
-    id: "railway",
-    brand: "Railway",
-    label: "Railway",
-    note: "A deployment platform that keeps you in flow instead of buried in infrastructure.",
-    script: "Railway. Ship 10x faster without the infrastructure burden. Get started today.",
-    accent: "#8d9cff",
-  },
-  {
-    id: "graphite",
-    brand: "Graphite",
-    label: "Graphite",
-    note: "A GitHub developer platform for higher quality software and faster code review.",
-    script: "Graphite. Help your GitHub team ship higher quality software faster. Get started for free.",
-    accent: "#55d0ff",
-  },
-  {
-    id: "fin",
-    brand: "Fin",
-    label: "Fin",
-    note: "The number one customer service agent for customer operations at scale.",
-    script: "Fin. The number one agent for customer service. Start your free trial.",
-    accent: "#ff7eb3",
-  },
-  {
-    id: "public",
-    brand: "Public.com",
-    label: "Public.com",
-    note: "Multi-asset investing with AI that works for your portfolio.",
-    script: "Public.com. Multi-asset investing with AI for your portfolio. Start here.",
-    accent: "#4dd3c9",
-  },
-  {
-    id: "plaid",
-    brand: "Plaid",
-    label: "Plaid",
-    note: "Build fintech solutions with safe, reliable financial data connections.",
-    script: "Plaid. Build fintech solutions with connected financial data. Start here.",
-    accent: "#85c767",
-  },
-  {
-    id: "okta",
-    brand: "Okta",
-    label: "Okta",
-    note: "Secure identity for employees, customers, and AI across enterprises and governments.",
-    script: "Okta. Secure identity for employees, customers, and AI. Start here.",
-    accent: "#4f96ff",
-  },
-  {
-    id: "lambda",
-    brand: "Lambda",
-    label: "Lambda",
-    note: "The superintelligence cloud platform for AI training and inference.",
-    script: "Lambda. The superintelligence cloud platform for AI training and inference. Start here.",
-    accent: "#ff9b42",
-  },
-  {
-    id: "gusto",
-    brand: "Gusto",
-    label: "Gusto",
-    note: "Online HR and payroll solutions for growing businesses.",
-    script: "Gusto. Online HR and payroll solutions for growing businesses.",
-    accent: "#ffad5c",
-  },
-  {
-    id: "vibe",
-    brand: "Vibe.co",
-    label: "Vibe.co",
-    note: "Grow your brand with TV ads on the easiest-to-use streaming TV ad platform.",
-    script: "Vibe.co. Grow your brand with TV ads. Start here.",
-    accent: "#ff736d",
   },
 ];
 
@@ -271,7 +89,11 @@ function buildReadDeck() {
     .map((entry, index) => ({
       ...entry,
       order: index + 1,
-      timeLimit: clamp(5.7 + entry.script.length / 18, MIN_READ_TIME, MAX_READ_TIME),
+      timeLimit: clamp(
+        READ_START_BUFFER + entry.script.length * READ_SECONDS_PER_CHARACTER,
+        MIN_READ_TIME,
+        MAX_READ_TIME,
+      ),
     }));
 }
 
@@ -298,7 +120,7 @@ function getDeliveryRating(score) {
   if (score >= 50) {
     return "Rough";
   }
-  return "Sponsor Pulled";
+  return "Phrase Missed";
 }
 
 function getOverallRating(score) {
@@ -306,7 +128,7 @@ function getOverallRating(score) {
     return "Perfect Delivery";
   }
   if (score >= 85) {
-    return "Sponsor Favorite";
+    return "Clean Delivery";
   }
   if (score >= 70) {
     return "Acceptable";
@@ -314,7 +136,7 @@ function getOverallRating(score) {
   if (score >= 50) {
     return "Rough Session";
   }
-  return "Sponsor Pulled";
+  return "Phrase Missed";
 }
 
 function getFeedbackTone(score) {
@@ -775,7 +597,7 @@ export class JohnSponsorReadOverlay {
         return;
       }
       this.promptSignature = "__empty";
-      this.promptElement.textContent = "Sponsor copy loads here when the read goes live.";
+      this.promptElement.textContent = "TBPN phrase loads here when the read goes live.";
       this.promptElement.dataset.empty = "true";
       return;
     }
@@ -841,7 +663,7 @@ export class JohnSponsorReadOverlay {
     if (!this.readDeck.length) {
       const placeholder = document.createElement("div");
       placeholder.className = "john-sponsor-read__queue-empty";
-      placeholder.textContent = "Five sponsor reads load here once the desk boots.";
+      placeholder.textContent = "Four TBPN phrases load here once the desk boots.";
       this.queueElement.append(placeholder);
       return;
     }
@@ -947,7 +769,7 @@ export class JohnSponsorReadOverlay {
     const currentMetrics = this.getCurrentMetrics();
     const readProgress =
       this.phase === "ready"
-        ? "0 / 5"
+        ? `0 / ${ROUND_SIZE}`
         : `${Math.min(ROUND_SIZE, this.completedReads.length + (this.currentRead ? 1 : 0))} / ${ROUND_SIZE}`;
 
     this.root.dataset.visible = this.cabinetVisible ? "true" : "false";
@@ -974,7 +796,7 @@ export class JohnSponsorReadOverlay {
         this.phase === "playing" ? formatCountdown(this.currentRemaining) : this.phase === "between" ? "Hold" : "--";
     }
     if (this.brandElement) {
-      this.brandElement.textContent = this.currentRead?.label ?? "Sponsor Deck";
+      this.brandElement.textContent = this.currentRead?.label ?? "Phrase Deck";
     }
     if (this.indexElement) {
       this.indexElement.textContent = this.currentRead
@@ -986,7 +808,7 @@ export class JohnSponsorReadOverlay {
     if (this.noteElement) {
       this.noteElement.textContent =
         this.currentRead?.note ??
-        "Type the live sponsor line exactly as shown. Case, punctuation, and spaces all count.";
+        "Type the TBPN phrase exactly as shown. Case, punctuation, and spaces all count.";
     }
     if (this.progressBarElement) {
       this.progressBarElement.style.width = `${currentMetrics.speed * 100}%`;

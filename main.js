@@ -6417,11 +6417,12 @@ function registerTylerBoardNpc(character, {
 
 function registerJohnSponsorNpc(character, {
   promptEyebrow = "John",
-  promptTitle = "Press E to read sponsors",
+  promptTitle = "Press E to read phrases",
   lines = [
-    "Copy is live. Hit the read clean and do not freelance.",
-    "The sponsor pays for precision, not improv. Respect the script.",
-    "If you stumble on the ad read, everybody feels it.",
+    "Live from the TBPN Ultradome",
+    "The Temple of Technology",
+    "The Fortress of Finance",
+    "The Capital of Capital",
   ],
   promptRadius = 1.8,
 } = {}) {
@@ -6482,7 +6483,7 @@ function registerNikChiefOfStaffNpc(character, {
 }
 
 function registerMaxClipperNpc(character, {
-  promptEyebrow = "Max",
+  promptEyebrow = "Jackson",
   promptTitle = "Press E to clip",
   lines = [
     "The timeline wants heat. Find the moment before it is gone.",
@@ -11786,7 +11787,7 @@ function addP3aStorageShelf() {
   });
   if (max) {
     registerMaxClipperNpc(max, {
-      promptEyebrow: "Max",
+      promptEyebrow: "Jackson",
       promptTitle: "Press E to clip",
       lines: [
         "The feed is moving fast. Grab the part people will repost.",
@@ -12389,11 +12390,12 @@ function addP3aStorageShelf() {
         } else {
           registerJohnSponsorNpc(seated, {
             promptEyebrow: "John",
-            promptTitle: "Press E to read sponsors",
+            promptTitle: "Press E to read phrases",
             lines: [
-              "Five reads, clean copy, no ad-libbing.",
-              "The sponsor stack changes, but the standard does not.",
-              "Keep the sponsors happy and the words exact.",
+              "Live from the TBPN Ultradome",
+              "The Temple of Technology",
+              "The Fortress of Finance",
+              "The Capital of Capital",
             ],
           });
         }
@@ -18946,7 +18948,7 @@ function startJohnSponsorRead(npc) {
   hideInteractionPrompt();
   const line =
     npc.lines[Math.floor(Math.random() * npc.lines.length)] ??
-    "Five sponsor reads. Accuracy times speed. Keep the copy clean.";
+    "Four TBPN phrases. Accuracy times speed. Keep the copy clean.";
   johnSponsorRead.start({ introLine: line });
   syncUi();
 }

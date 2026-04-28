@@ -85,7 +85,7 @@ const PERSON_CYCLE = [
   { label: "Dara Khosrowshahi", detail: "CEO, Uber", shortLabel: "Dara" },
   { label: "Nikesh Arora", detail: "CEO, Palo Alto Networks", shortLabel: "Arora" },
   { label: "Aaron Levie", detail: "Co-founder & CEO, Box", shortLabel: "Levie" },
-  { label: "Max Levchin", detail: "Co-founder, PayPal; CEO, Affirm", shortLabel: "Levchin" },
+  { label: "Jackson", detail: "Operator on the TBPN floor", shortLabel: "Jackson" },
   { label: "Bill Gurley", detail: "Benchmark partner, legendary VC", shortLabel: "Gurley" },
   { label: "Ben Horowitz", detail: "Co-founder, Andreessen Horowitz", shortLabel: "Horowitz" },
   { label: "Joe Lonsdale", detail: "Co-founder, Palantir; Founder, 8VC", shortLabel: "Lonsdale" },
