@@ -606,7 +606,6 @@ const interactionPromptCooldownFill = document.querySelector("#interactionPrompt
 const walkKeyHud = document.querySelector("#walkKeyHud");
 const walkNumKeys = document.querySelector("#walkNumKeys");
 const seatedSpacePrompt = document.querySelector("#seatedSpacePrompt");
-const walkLogoHud = document.querySelector("#walkLogoHud");
 const walkKeyW = document.querySelector("#walkKeyW");
 const walkKeyA = document.querySelector("#walkKeyA");
 const walkKeyS = document.querySelector("#walkKeyS");
@@ -674,7 +673,6 @@ function getHudElements() {
   return [
     walkKeyHud,
     walkNumKeys,
-    walkLogoHud,
     walkKey1,
     walkKey2,
     seatedSpacePrompt,
@@ -4521,8 +4519,8 @@ function closeSessionGate() {
 
 async function fetchLeaderboard() {
   const { data, error } = await supabase
-    .from("profiles")
-    .select("id, email, display_name, subscriber_count, updated_at")
+    .from("leaderboard_profiles")
+    .select("id, display_name, subscriber_count, updated_at")
     .order("subscriber_count", { ascending: false })
     .order("updated_at", { ascending: false })
     .limit(LEADERBOARD_LIMIT);
@@ -4682,14 +4680,14 @@ async function ensureSubscriberProfile(user, preferredDisplayName = "") {
   const { data, error } = await supabase
     .from("profiles")
     .upsert(payload, { onConflict: "id" })
-    .select("id, email, display_name, subscriber_count, last_subscriber_delta, has_subscriber_outcome, updated_at")
+    .select("id, display_name, subscriber_count, last_subscriber_delta, has_subscriber_outcome, updated_at")
     .single();
 
   if (error) {
     throw error;
   }
 
-  return normalizeSubscriberProfile(data);
+  return normalizeSubscriberProfile({ ...data, email: payload.email });
 }
 
 async function loadSubscriberProfileFromSession(session, preferredDisplayName = "") {
@@ -21001,10 +20999,6 @@ function syncUi() {
   if (walkNumKeys) {
     const visible = state.mode === "walk" && sessionActive;
     walkNumKeys.setAttribute("aria-hidden", visible ? "false" : "true");
-  }
-  if (walkLogoHud) {
-    const visible = state.mode === "walk" && sessionActive;
-    walkLogoHud.setAttribute("aria-hidden", visible ? "false" : "true");
   }
   if (seatedSpacePrompt) {
     const visible =

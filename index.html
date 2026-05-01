@@ -20,6 +20,10 @@
   <body>
     <canvas id="scene"></canvas>
 
+    <div class="mobile-unavailable" role="status" aria-live="polite">
+      Sorry, mobile implementation isn't available at this time
+    </div>
+
     <div id="sessionGate" class="session-gate" aria-hidden="true" hidden>
       <div class="session-gate__scrim"></div>
       <form id="sessionGateForm" class="session-gate__card" autocomplete="off">
@@ -152,14 +156,6 @@
     <div id="seatedSpacePrompt" class="seated-space-prompt" aria-hidden="true" hidden>
       <div class="seated-space-prompt__key">Space</div>
       <div class="seated-space-prompt__label">Toggle Guest View</div>
-    </div>
-
-    <div id="walkLogoHud" class="walk-logo-hud" aria-hidden="true">
-      <img
-        class="walk-logo-hud__static"
-        src="./TBPN Static Logos v2 (4) (1).png"
-        alt="TBPN presented by Ramp"
-      />
     </div>
 
     <section id="chatPanel" class="chat-panel" aria-hidden="true" hidden>
@@ -1027,6 +1023,6 @@
       </div>
     </div>
 
-    <script type="module" src="./main.js?v=multiplayer-37"></script>
+    <script type="module" src="./main.js?v=multiplayer-39"></script>
   </body>
 </html>

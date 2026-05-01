@@ -36,6 +36,31 @@ body {
   height: 100%;
 }
 
+.mobile-unavailable {
+  display: none;
+}
+
+@media (max-width: 820px), (hover: none) and (pointer: coarse) {
+  .mobile-unavailable {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 28px;
+    background:
+      radial-gradient(circle at 50% 0%, rgba(65, 92, 118, 0.28), transparent 38%),
+      #070b10;
+    color: #f4f7fb;
+    font-size: clamp(1.4rem, 7vw, 2.4rem);
+    font-weight: 800;
+    line-height: 1.15;
+    text-align: center;
+    pointer-events: auto;
+  }
+}
+
 .projector-overlay-layer {
   position: fixed;
   inset: 0;
@@ -882,30 +907,6 @@ body {
 }
 .mute-button:hover {
   background: rgba(14, 28, 50, 0.9);
-}
-
-.walk-logo-hud {
-  position: fixed;
-  inset: 0;
-  z-index: 19;
-  pointer-events: none;
-  opacity: 1;
-  transition: opacity 120ms ease;
-}
-
-.walk-logo-hud[aria-hidden="true"] {
-  opacity: 0;
-}
-
-.walk-logo-hud__static {
-  position: absolute;
-  top: 18px;
-  right: 18px;
-  width: clamp(380px, 39vw, 540px);
-  aspect-ratio: 1.1 / 1;
-  object-fit: cover;
-  object-position: 87% 8%;
-  filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.36));
 }
 
 .chat-panel {
@@ -6202,12 +6203,6 @@ button:active {
     bottom: calc(42px + max(6px, env(safe-area-inset-bottom, 0px)));
     transform: scale(0.92) translateX(-50%);
     transform-origin: center bottom;
-  }
-
-  .walk-logo-hud__static {
-    top: 12px;
-    right: 12px;
-    width: clamp(260px, 58vw, 380px);
   }
 
   .max-clipper__grid {
