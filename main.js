@@ -653,20 +653,6 @@ const leaderboardPanel = document.querySelector("#leaderboardPanel");
 const leaderboardList = document.querySelector("#leaderboardList");
 const leaderboardEmpty = document.querySelector("#leaderboardEmpty");
 const leaderboardMeta = document.querySelector("#leaderboardMeta");
-const authSignOutButton = document.querySelector("#authSignOutButton");
-const sessionGate = document.querySelector("#sessionGate");
-const sessionGateForm = document.querySelector("#sessionGateForm");
-const sessionGateTitle = document.querySelector("#sessionGateTitle");
-const sessionGateCopy = document.querySelector("#sessionGateCopy");
-const sessionGateLoginModeButton = document.querySelector("#sessionGateLoginMode");
-const sessionGateSignupModeButton = document.querySelector("#sessionGateSignupMode");
-const sessionGateEmailInput = document.querySelector("#sessionGateEmail");
-const sessionGateNameField = document.querySelector("#sessionGateNameField");
-const sessionGateNameInput = document.querySelector("#sessionGateName");
-const sessionGatePasswordInput = document.querySelector("#sessionGatePassword");
-const sessionGateLastPlayer = document.querySelector("#sessionGateLastPlayer");
-const sessionGateError = document.querySelector("#sessionGateError");
-const sessionGateSubmitButton = document.querySelector("#sessionGateSubmit");
 
 let isHudHidden = false;
 function getHudElements() {
@@ -694,8 +680,6 @@ function getHudElements() {
     leaderboardList,
     leaderboardEmpty,
     leaderboardMeta,
-    authSignOutButton,
-    sessionGate,
   ].filter(Boolean);
 }
 
@@ -723,6 +707,8 @@ const SUBSCRIBERS_STEP = 50;
 const SUBSCRIBERS_GAIN_THRESHOLD = 0.62;
 const SUBSCRIBER_EMAIL_LIMIT = 120;
 const SUBSCRIBER_NAME_LIMIT = 24;
+const GUEST_CREDENTIALS_STORAGE_KEY = "tbpn-sim:guest-credentials";
+const GUEST_PROGRESS_STORAGE_KEY = "tbpn-sim:guest-progress";
 const CHAT_MESSAGE_LIMIT = 280;
 const CHAT_HISTORY_LIMIT = 120;
 const CHAT_HISTORY_POLL_MS = 12000;
@@ -737,9 +723,8 @@ let hasSubscriberOutcome = false;
 let activeSubscriberProfileKey = "";
 let activeSubscriberEmail = "";
 let activeSubscriberName = "";
+let activeSubscriberIsLocal = false;
 let leaderboardEntries = [];
-let authMode = "login";
-let isAuthBusy = false;
 let isChatBusy = false;
 let isSuggestionBusy = false;
 let isSuggestionPanelOpen = false;
@@ -1059,7 +1044,6 @@ function syncBackgroundMusicPlayback() {
   const shouldPlay =
     state.mode === "walk" &&
     !isProjectorFullscreenOpen() &&
-    !isSessionGateOpen() &&
     !isProjectorStreamShowingInAudienceArea();
   if (shouldPlay) {
     if (bgMusic.paused) {
@@ -2248,6 +2232,92 @@ function getSubscriberDisplayNameFromEmail(email) {
   return sanitizeSubscriberName(titled || localPart);
 }
 
+function createGuestCredentials() {
+  const id = (crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`)
+    .replace(/[^a-z0-9]/gi, "")
+    .toLowerCase();
+  const label = id.slice(-6).toUpperCase();
+  return {
+    id,
+    email: `guest-${id}@play.tbpn.game`,
+    password: `tbpn-${id}-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`,
+    displayName: `Guest ${label}`,
+  };
+}
+
+function getOrCreateGuestCredentials() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(GUEST_CREDENTIALS_STORAGE_KEY) ?? "null");
+    if (
+      stored?.id &&
+      isValidSubscriberEmail(stored.email) &&
+      typeof stored.password === "string" &&
+      stored.password.length >= 6 &&
+      sanitizeSubscriberName(stored.displayName)
+    ) {
+      return { credentials: stored, isNew: stored.registered !== true };
+    }
+  } catch {
+    // A fresh guest still works when storage is unavailable or contains invalid data.
+  }
+
+  const credentials = createGuestCredentials();
+  try {
+    localStorage.setItem(GUEST_CREDENTIALS_STORAGE_KEY, JSON.stringify(credentials));
+  } catch {
+    // The active browser session can continue without persistent credentials.
+  }
+  return { credentials, isNew: true };
+}
+
+function markGuestCredentialsRegistered(credentials) {
+  credentials.registered = true;
+  try {
+    localStorage.setItem(GUEST_CREDENTIALS_STORAGE_KEY, JSON.stringify(credentials));
+  } catch {
+    // Supabase still persists the active session when credential storage is unavailable.
+  }
+}
+
+function loadLocalGuestProgress(guestId) {
+  try {
+    const progress = JSON.parse(localStorage.getItem(GUEST_PROGRESS_STORAGE_KEY) ?? "null");
+    if (progress?.guestId !== guestId) {
+      return null;
+    }
+    return {
+      subscriberCount: Number.isFinite(progress.subscriberCount)
+        ? Math.max(0, Math.round(progress.subscriberCount))
+        : SUBSCRIBERS_START,
+      lastSubscriberDelta: Number.isFinite(progress.lastSubscriberDelta)
+        ? Math.round(progress.lastSubscriberDelta)
+        : 0,
+      hasSubscriberOutcome: Boolean(progress.hasSubscriberOutcome),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function persistLocalGuestProgress() {
+  if (!activeSubscriberIsLocal) {
+    return;
+  }
+  try {
+    localStorage.setItem(
+      GUEST_PROGRESS_STORAGE_KEY,
+      JSON.stringify({
+        guestId: activeSubscriberProfileKey,
+        subscriberCount,
+        lastSubscriberDelta,
+        hasSubscriberOutcome,
+      }),
+    );
+  } catch {
+    // Progress remains available for the current page when storage is unavailable.
+  }
+}
+
 function sanitizeChatMessage(message) {
   return String(message ?? "")
     .replace(/\r\n/g, "\n")
@@ -3105,7 +3175,7 @@ function syncRemotePlayersFromPresence() {
     }
   });
 
-  multiplayerOnlineCount = (isSubscriberSessionReady() ? 1 : 0) + remoteCount;
+  multiplayerOnlineCount = (isCloudSubscriberSessionReady() ? 1 : 0) + remoteCount;
   syncMultiplayerHud();
 }
 
@@ -3499,7 +3569,7 @@ function applySharedWorldState(worldState, maxEventOrder = multiplayerWorldSyncR
 }
 
 function broadcastMultiplayerEvent(event, payload) {
-  if (!multiplayerChannel || !multiplayerSubscribed || !isSubscriberSessionReady()) {
+  if (!multiplayerChannel || !multiplayerSubscribed || !isCloudSubscriberSessionReady()) {
     return;
   }
 
@@ -3650,7 +3720,7 @@ function syncMultiplayerHud() {
     return;
   }
 
-  const sessionActive = isSubscriberSessionReady() && !isSessionGateOpen();
+  const sessionActive = isCloudSubscriberSessionReady();
   multiplayerHud.hidden = !sessionActive;
   if (!sessionActive) {
     multiplayerHud.title = "";
@@ -3715,7 +3785,7 @@ function pruneStaleRemotePlayers(now = Date.now()) {
   });
 
   if (removedAny) {
-    multiplayerOnlineCount = (isSubscriberSessionReady() ? 1 : 0) + remotePlayers.size;
+    multiplayerOnlineCount = (isCloudSubscriberSessionReady() ? 1 : 0) + remotePlayers.size;
     syncMultiplayerHud();
   }
 }
@@ -3728,7 +3798,7 @@ function startMultiplayerPresencePolling() {
     trackLocalMultiplayerPresence();
   }
   multiplayerPresencePollTimer = window.setInterval(() => {
-    if (!multiplayerChannel || !multiplayerSubscribed || !isSubscriberSessionReady()) {
+    if (!multiplayerChannel || !multiplayerSubscribed || !isCloudSubscriberSessionReady()) {
       return;
     }
 
@@ -3741,7 +3811,7 @@ function startMultiplayerPresencePolling() {
 }
 
 function scheduleMultiplayerReconnect(reason = "") {
-  if (!isSubscriberSessionReady() || multiplayerReconnectTimer) {
+  if (!isCloudSubscriberSessionReady() || multiplayerReconnectTimer) {
     return;
   }
 
@@ -3751,7 +3821,7 @@ function scheduleMultiplayerReconnect(reason = "") {
 
   multiplayerReconnectTimer = window.setTimeout(() => {
     multiplayerReconnectTimer = 0;
-    if (!isSubscriberSessionReady()) {
+    if (!isCloudSubscriberSessionReady()) {
       return;
     }
 
@@ -3796,7 +3866,7 @@ function disconnectMultiplayerSession() {
 }
 
 function ensureMultiplayerSession() {
-  if (!isSubscriberSessionReady()) {
+  if (!isCloudSubscriberSessionReady()) {
     disconnectMultiplayerSession();
     return;
   }
@@ -3931,7 +4001,7 @@ function handleMultiplayerPublishFailure(channel, error, reconnectReason) {
 }
 
 function trackLocalMultiplayerPresence(force = false) {
-  if (!multiplayerChannel || !multiplayerSubscribed || !isSubscriberSessionReady()) {
+  if (!multiplayerChannel || !multiplayerSubscribed || !isCloudSubscriberSessionReady()) {
     return;
   }
 
@@ -3969,7 +4039,7 @@ function trackLocalMultiplayerPresence(force = false) {
 }
 
 function scheduleLocalMultiplayerPresence(force = false) {
-  if (!multiplayerChannel || !multiplayerSubscribed || !isSubscriberSessionReady()) {
+  if (!multiplayerChannel || !multiplayerSubscribed || !isCloudSubscriberSessionReady()) {
     return;
   }
 
@@ -4021,6 +4091,7 @@ function clearActiveSubscriberProfile() {
   activeSubscriberProfileKey = "";
   activeSubscriberEmail = "";
   activeSubscriberName = "";
+  activeSubscriberIsLocal = false;
   subscriberCount = SUBSCRIBERS_START;
   lastSubscriberDelta = 0;
   hasSubscriberOutcome = false;
@@ -4032,88 +4103,12 @@ function clearActiveSubscriberProfile() {
   resetChatHistory();
 }
 
-function setSessionGateMessage(message = "") {
-  if (sessionGateError) {
-    sessionGateError.textContent = message;
-  }
-}
-
-function setSessionGateBusy(isBusyNow) {
-  isAuthBusy = isBusyNow;
-  if (sessionGateEmailInput) {
-    sessionGateEmailInput.disabled = isBusyNow;
-  }
-  if (sessionGateNameInput) {
-    sessionGateNameInput.disabled = isBusyNow;
-  }
-  if (sessionGatePasswordInput) {
-    sessionGatePasswordInput.disabled = isBusyNow;
-  }
-  if (sessionGateSubmitButton) {
-    sessionGateSubmitButton.disabled = isBusyNow;
-  }
-  if (sessionGateLoginModeButton) {
-    sessionGateLoginModeButton.disabled = isBusyNow;
-  }
-  if (sessionGateSignupModeButton) {
-    sessionGateSignupModeButton.disabled = isBusyNow;
-  }
-  if (authSignOutButton) {
-    authSignOutButton.disabled = isBusyNow;
-  }
-}
-
-function setAuthMode(mode) {
-  authMode = mode === "signup" ? "signup" : "login";
-
-  if (sessionGateLoginModeButton) {
-    sessionGateLoginModeButton.dataset.active = authMode === "login" ? "true" : "false";
-  }
-  if (sessionGateSignupModeButton) {
-    sessionGateSignupModeButton.dataset.active = authMode === "signup" ? "true" : "false";
-  }
-  if (sessionGateTitle) {
-    sessionGateTitle.textContent =
-      authMode === "signup" ? "Create your TBPN account." : "Log in to your TBPN account.";
-  }
-  if (sessionGateCopy) {
-    sessionGateCopy.textContent =
-      authMode === "signup"
-        ? "Create one account and your subscriber total will follow you across sessions."
-        : "Your subscriber total and leaderboard spot are tied to your authenticated account.";
-  }
-  if (sessionGateNameField) {
-    const showNameField = authMode === "signup";
-    sessionGateNameField.hidden = !showNameField;
-    sessionGateNameField.classList.toggle("session-gate__field--hidden", !showNameField);
-  }
-  if (sessionGateNameInput) {
-    sessionGateNameInput.required = authMode === "signup";
-    if (authMode === "login") {
-      sessionGateNameInput.value = "";
-    }
-  }
-  if (sessionGatePasswordInput) {
-    sessionGatePasswordInput.autocomplete = authMode === "signup" ? "new-password" : "current-password";
-  }
-  if (sessionGateSubmitButton) {
-    sessionGateSubmitButton.textContent = authMode === "signup" ? "Create Account" : "Log In";
-  }
-  if (sessionGateLastPlayer) {
-    sessionGateLastPlayer.textContent =
-      authMode === "signup"
-        ? "Use a real email and password. New accounts should enter the game immediately after signup."
-        : "Use your existing TBPN account to load your saved subscriber total.";
-  }
-  setSessionGateMessage("");
-}
-
-function isSessionGateOpen() {
-  return Boolean(sessionGate && !sessionGate.hidden);
-}
-
 function isSubscriberSessionReady() {
   return Boolean(activeSubscriberProfileKey);
+}
+
+function isCloudSubscriberSessionReady() {
+  return isSubscriberSessionReady() && !activeSubscriberIsLocal;
 }
 
 function isChatInputFocused() {
@@ -4163,7 +4158,7 @@ function openChatPanel() {
 }
 
 async function loadInitialChatHistory() {
-  if (!isSubscriberSessionReady() || chatHistoryLoaded) {
+  if (!isCloudSubscriberSessionReady() || chatHistoryLoaded) {
     return;
   }
 
@@ -4208,7 +4203,7 @@ async function loadInitialChatHistory() {
 }
 
 async function pollChatHistory() {
-  if (!isSubscriberSessionReady() || chatHistoryRequest) {
+  if (!isCloudSubscriberSessionReady() || chatHistoryRequest) {
     return;
   }
 
@@ -4273,10 +4268,8 @@ async function handleChatSubmit(event) {
     return;
   }
 
-  if (!isSubscriberSessionReady()) {
-    closeChatPanel();
-    openSessionGate();
-    setSessionGateMessage("Log in to join the room chat.");
+  if (!isCloudSubscriberSessionReady()) {
+    setChatStatus("Chat is unavailable while the game is offline.", "error");
     return;
   }
 
@@ -4389,12 +4382,6 @@ function closeSuggestFeaturePanel() {
 }
 
 function openSuggestFeaturePanel() {
-  if (!isSubscriberSessionReady()) {
-    openSessionGate();
-    setSessionGateMessage("Log in to send a suggestion.");
-    return;
-  }
-
   if (!suggestFeaturePanel) {
     return;
   }
@@ -4423,10 +4410,8 @@ async function handleSuggestFeatureSubmit(event) {
     return;
   }
 
-  if (!isSubscriberSessionReady()) {
-    closeSuggestFeaturePanel();
-    openSessionGate();
-    setSessionGateMessage("Log in to send a suggestion.");
+  if (!isCloudSubscriberSessionReady()) {
+    setSuggestionStatus("Suggestions are unavailable while the game is offline.", "error");
     return;
   }
 
@@ -4476,47 +4461,6 @@ async function handleSuggestFeatureSubmit(event) {
   }
 }
 
-function openSessionGate() {
-  if (!sessionGate) {
-    return;
-  }
-
-  closeChatPanel();
-  closeSuggestFeaturePanel();
-  unlockPointer();
-  clearMovementState();
-  sessionGate.hidden = false;
-  sessionGate.setAttribute("aria-hidden", "false");
-  syncUi();
-
-  if (sessionGateEmailInput) {
-    requestAnimationFrame(() => {
-      sessionGateEmailInput.focus();
-      sessionGateEmailInput.select();
-    });
-  }
-}
-
-function closeSessionGate() {
-  if (!sessionGate) {
-    return;
-  }
-
-  sessionGate.classList.add("session-gate--closing");
-  sessionGate.addEventListener(
-    "transitionend",
-    function onCloseTransitionEnd() {
-      sessionGate.removeEventListener("transitionend", onCloseTransitionEnd);
-      sessionGate.classList.remove("session-gate--closing");
-      sessionGate.hidden = true;
-      sessionGate.setAttribute("aria-hidden", "true");
-      setSessionGateMessage("");
-      syncUi();
-    },
-    { once: true },
-  );
-}
-
 async function fetchLeaderboard() {
   const { data, error } = await supabase
     .from("leaderboard_profiles")
@@ -4542,6 +4486,9 @@ function renderLeaderboard() {
   }
   if (leaderboardEmpty) {
     leaderboardEmpty.hidden = leaderboardEntries.length > 0;
+    leaderboardEmpty.textContent = activeSubscriberIsLocal
+      ? "Leaderboard unavailable while offline."
+      : "Start a session to claim the first spot.";
   }
 
   const rows = leaderboardEntries.map((entry, index) => {
@@ -4595,11 +4542,13 @@ function syncSubscribersHud() {
   }
   if (subscribersHudRank) {
     subscribersHudRank.textContent =
-      activeRank >= 0
+      activeSubscriberIsLocal
+        ? "Local guest"
+        : activeRank >= 0
         ? `Rank #${activeRank + 1}`
         : isSubscriberSessionReady()
         ? "Outside Top 20"
-        : "Login required";
+        : "Starting session";
   }
   if (subscribersHudCount) {
     const profileChanged = profileKeyForAnimation !== subscribersHudLastProfileKey;
@@ -4625,9 +4574,11 @@ function syncSubscribersHud() {
   if (subscribersHudDelta) {
     subscribersHudDelta.textContent =
       !isSubscriberSessionReady()
-        ? "Log in to start"
+        ? "Starting session"
         : !hasSubscriberOutcome
-        ? "Session base"
+        ? activeSubscriberIsLocal
+          ? "Offline session"
+          : "Session base"
         : lastSubscriberDelta === 0
         ? "No change last run"
         : `Last run ${formatSignedSubscriberCount(lastSubscriberDelta)}`;
@@ -4640,13 +4591,10 @@ function syncSubscribersHud() {
         ? "down"
         : "flat";
   }
-  if (authSignOutButton) {
-    authSignOutButton.hidden = !isSubscriberSessionReady();
-  }
 }
 
 async function refreshSubscriberViews() {
-  if (!isSubscriberSessionReady()) {
+  if (!isCloudSubscriberSessionReady()) {
     leaderboardEntries = [];
     renderLeaderboard();
     syncSubscribersHud();
@@ -4673,7 +4621,9 @@ async function ensureSubscriberProfile(user, preferredDisplayName = "") {
 
   const payload = {
     id: user.id,
-    email: sanitizeSubscriberEmail(user.email),
+    email:
+      sanitizeSubscriberEmail(user.email) ||
+      `guest-${String(user.id).replace(/[^a-z0-9]/gi, "").toLowerCase()}@play.tbpn.game`,
     display_name: displayName,
   };
 
@@ -4692,25 +4642,19 @@ async function ensureSubscriberProfile(user, preferredDisplayName = "") {
 
 async function loadSubscriberProfileFromSession(session, preferredDisplayName = "") {
   if (!session?.user) {
-    disconnectMultiplayerSession();
-    clearActiveSubscriberProfile();
-    await refreshSubscriberViews();
-    openSessionGate();
-    return;
+    throw new Error("The guest session did not return a user.");
   }
 
   const profile = await ensureSubscriberProfile(session.user, preferredDisplayName);
   activeSubscriberProfileKey = profile.id;
   activeSubscriberEmail = profile.email;
   activeSubscriberName = profile.display_name;
+  activeSubscriberIsLocal = false;
   subscriberCount = profile.subscriber_count;
   lastSubscriberDelta = profile.last_subscriber_delta;
   hasSubscriberOutcome = profile.has_subscriber_outcome;
-  if (sessionGatePasswordInput) {
-    sessionGatePasswordInput.value = "";
-  }
-  closeSessionGate();
   await refreshSubscriberViews();
+  syncUi();
   ensureMultiplayerSession();
   startChatHistoryPolling();
 }
@@ -4722,6 +4666,10 @@ async function persistSubscriberProgress() {
   }
 
   syncSubscribersHud();
+  if (activeSubscriberIsLocal) {
+    persistLocalGuestProgress();
+    return;
+  }
 
   const { error } = await supabase
     .from("profiles")
@@ -4742,159 +4690,85 @@ async function persistSubscriberProgress() {
   await refreshSubscriberViews();
 }
 
-async function handleSupabaseSession(session) {
-  try {
-    if (!session?.user) {
-      disconnectMultiplayerSession();
-      setAuthMode("login");
-      clearActiveSubscriberProfile();
-      if (sessionGatePasswordInput) {
-        sessionGatePasswordInput.value = "";
-      }
-      await refreshSubscriberViews();
-      openSessionGate();
-      return;
-    }
+async function activateLocalGuestSession(credentials) {
+  disconnectMultiplayerSession();
+  clearActiveSubscriberProfile();
 
-    await loadSubscriberProfileFromSession(session);
-  } catch (error) {
-    console.error("Unable to load Supabase session", error);
-    disconnectMultiplayerSession();
-    setAuthMode("login");
-    clearActiveSubscriberProfile();
-    await refreshSubscriberViews();
-    openSessionGate();
-    setSessionGateMessage(error?.message || "Unable to load your account right now.");
-  }
+  const progress = loadLocalGuestProgress(credentials.id);
+  activeSubscriberProfileKey = credentials.id;
+  activeSubscriberEmail = credentials.email;
+  activeSubscriberName = sanitizeSubscriberName(credentials.displayName) || "Guest";
+  activeSubscriberIsLocal = true;
+  subscriberCount = progress?.subscriberCount ?? SUBSCRIBERS_START;
+  lastSubscriberDelta = progress?.lastSubscriberDelta ?? 0;
+  hasSubscriberOutcome = progress?.hasSubscriberOutcome ?? false;
+
+  await refreshSubscriberViews();
+  syncUi();
 }
 
-async function initializeSupabaseAuth() {
-  setAuthMode("login");
-  setSessionGateBusy(true);
+async function createOrRestoreGuestSession(credentials, isNew) {
+  if (isNew) {
+    const { data, error } = await supabase.auth.signUp({
+      email: credentials.email,
+      password: credentials.password,
+      options: {
+        data: {
+          display_name: credentials.displayName,
+        },
+      },
+    });
+    if (error) {
+      throw error;
+    }
+    if (data.session) {
+      markGuestCredentialsRegistered(credentials);
+      return data.session;
+    }
+  }
+
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: credentials.email,
+    password: credentials.password,
+  });
+  if (error) {
+    throw error;
+  }
+  markGuestCredentialsRegistered(credentials);
+  return data.session;
+}
+
+async function initializeGuestSession() {
+  const { credentials, isNew } = getOrCreateGuestCredentials();
+  await activateLocalGuestSession(credentials);
+
   try {
     const { data, error } = await supabase.auth.getSession();
     if (error) {
       throw error;
     }
 
-    if (data?.session) {
-      await handleSupabaseSession(data.session);
-    } else {
-      disconnectMultiplayerSession();
-      setAuthMode("login");
-      clearActiveSubscriberProfile();
-      await refreshSubscriberViews();
-      openSessionGate();
+    const session = data?.session ?? await createOrRestoreGuestSession(credentials, isNew);
+    if (!session?.user) {
+      throw new Error("The guest session did not return a user.");
     }
+
+    await loadSubscriberProfileFromSession(session, credentials.displayName);
   } catch (error) {
-    console.error("Unable to initialize auth", error);
-    disconnectMultiplayerSession();
-    setAuthMode("login");
-    clearActiveSubscriberProfile();
-    await refreshSubscriberViews();
-    openSessionGate();
-    setSessionGateMessage(error?.message || "Unable to initialize login.");
-  } finally {
-    setSessionGateBusy(false);
+    console.warn("Cloud guest session unavailable; continuing locally.", error);
+    await activateLocalGuestSession(credentials);
   }
 
   supabase.auth.onAuthStateChange((_event, session) => {
+    if (!session?.user || session.user.id === activeSubscriberProfileKey) {
+      return;
+    }
     window.setTimeout(() => {
-      void handleSupabaseSession(session);
+      void loadSubscriberProfileFromSession(session).catch((error) => {
+        console.warn("Unable to refresh the cloud guest session.", error);
+      });
     }, 0);
   });
-}
-
-async function handleSessionGateSubmit(event) {
-  event.preventDefault();
-  if (isAuthBusy) {
-    return;
-  }
-
-  const email = sanitizeSubscriberEmail(sessionGateEmailInput?.value ?? "");
-  const password = sessionGatePasswordInput?.value ?? "";
-  const name = sanitizeSubscriberName(sessionGateNameInput?.value ?? "");
-
-  if (!isValidSubscriberEmail(email)) {
-    setSessionGateMessage("Enter a valid email address.");
-    sessionGateEmailInput?.focus();
-    return;
-  }
-
-  if (password.length < 6) {
-    setSessionGateMessage("Password must be at least 6 characters.");
-    sessionGatePasswordInput?.focus();
-    return;
-  }
-
-  if (authMode === "signup" && !name) {
-    setSessionGateMessage("Choose the display name you want on the leaderboard.");
-    sessionGateNameInput?.focus();
-    return;
-  }
-
-  setSessionGateBusy(true);
-  setSessionGateMessage("");
-
-  try {
-    if (authMode === "signup") {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            display_name: name,
-          },
-        },
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      if (data.session) {
-        await loadSubscriberProfileFromSession(data.session, name);
-      } else {
-        setAuthMode("login");
-        setSessionGateMessage("Account created, but no session was returned. Check that Confirm email is disabled in Supabase.");
-      }
-    } else {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      await loadSubscriberProfileFromSession(data.session);
-    }
-  } catch (error) {
-    console.error("Supabase auth error", error);
-    setSessionGateMessage(error?.message || "Unable to authenticate right now.");
-  } finally {
-    setSessionGateBusy(false);
-  }
-}
-
-async function handleSignOut() {
-  if (isAuthBusy) {
-    return;
-  }
-
-  setSessionGateBusy(true);
-  try {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      throw error;
-    }
-  } catch (error) {
-    console.error("Unable to sign out", error);
-    setSessionGateMessage(error?.message || "Unable to sign out right now.");
-  } finally {
-    setSessionGateBusy(false);
-  }
 }
 
 function handleSubscribersRunOutcome({ performance } = {}) {
@@ -5011,12 +4885,16 @@ window.addEventListener("keydown", onKeyDown);
 window.addEventListener("keyup", onKeyUp);
 window.addEventListener("blur", clearMovementState);
 window.addEventListener("online", () => {
-  if (isSubscriberSessionReady() && multiplayerConnectionState !== "connected") {
+  if (isCloudSubscriberSessionReady() && multiplayerConnectionState !== "connected") {
     scheduleMultiplayerReconnect("the browser coming back online");
   }
 });
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && isSubscriberSessionReady() && multiplayerConnectionState !== "connected") {
+  if (
+    document.visibilityState === "visible" &&
+    isCloudSubscriberSessionReady() &&
+    multiplayerConnectionState !== "connected"
+  ) {
     scheduleMultiplayerReconnect("the tab becoming active again");
   }
 });
@@ -5024,41 +4902,6 @@ window.addEventListener("pagehide", disconnectMultiplayerSession);
 window.addEventListener("beforeunload", disconnectMultiplayerSession);
 window.addEventListener("beforeunload", stopChatHistoryPolling);
 window.addEventListener("beforeunload", stopProjectorStatusPolling);
-if (sessionGateForm) {
-  sessionGateForm.addEventListener("submit", (event) => {
-    void handleSessionGateSubmit(event);
-  });
-}
-if (sessionGateLoginModeButton) {
-  sessionGateLoginModeButton.addEventListener("click", () => {
-    setAuthMode("login");
-  });
-}
-if (sessionGateSignupModeButton) {
-  sessionGateSignupModeButton.addEventListener("click", () => {
-    setAuthMode("signup");
-  });
-}
-if (sessionGateEmailInput) {
-  sessionGateEmailInput.addEventListener("input", () => {
-    setSessionGateMessage("");
-  });
-}
-if (sessionGateNameInput) {
-  sessionGateNameInput.addEventListener("input", () => {
-    setSessionGateMessage("");
-  });
-}
-if (sessionGatePasswordInput) {
-  sessionGatePasswordInput.addEventListener("input", () => {
-    setSessionGateMessage("");
-  });
-}
-if (authSignOutButton) {
-  authSignOutButton.addEventListener("click", () => {
-    void handleSignOut();
-  });
-}
 if (chatForm) {
   chatForm.addEventListener("submit", (event) => {
     void handleChatSubmit(event);
@@ -5115,7 +4958,7 @@ if (suggestFeatureCloseButton) {
 
 syncUi();
 renderer.setAnimationLoop(animate);
-void initializeSupabaseAuth();
+void initializeGuestSession();
 
 function buildEnvironment() {
   const sky = new THREE.Mesh(
@@ -20962,7 +20805,7 @@ function enterWalkMode(view = "firstPerson") {
 }
 
 function syncUi() {
-  const sessionActive = isSubscriberSessionReady() && !isSessionGateOpen();
+  const sessionActive = isSubscriberSessionReady();
   const gameplayHudVisible = state.mode !== "minigame" && sessionActive;
 
   if (!gameplayHudVisible && isSuggestionPanelOpen) {
@@ -21060,7 +20903,6 @@ function onPointerMove(event) {
     state.mode !== "walk" ||
     !isPointerLocked ||
     !isSubscriberSessionReady() ||
-    isSessionGateOpen() ||
     isProjectorFullscreenOpen()
   ) {
     return;
@@ -21081,7 +20923,6 @@ function onCanvasMouseDown(event) {
     !isPointerLocked ||
     !state.carriedBasketball ||
     isSuggestionPanelOpen ||
-    isSessionGateOpen() ||
     isProjectorFullscreenOpen()
   ) {
     return;
@@ -21096,7 +20937,6 @@ function maybeLockWalkthrough() {
     state.mode === "walk" &&
     !isPointerLocked &&
     isSubscriberSessionReady() &&
-    !isSessionGateOpen() &&
     !isSuggestionPanelOpen &&
     !isProjectorFullscreenOpen()
   ) {
@@ -21118,10 +20958,6 @@ function onKeyDown(event) {
       event.preventDefault();
       closeSuggestFeaturePanel();
     }
-    return;
-  }
-
-  if (isSessionGateOpen()) {
     return;
   }
 
@@ -21250,10 +21086,6 @@ function onKeyUp(event) {
   }
 
   if (isSuggestionPanelOpen) {
-    return;
-  }
-
-  if (isSessionGateOpen()) {
     return;
   }
 

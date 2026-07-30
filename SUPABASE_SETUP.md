@@ -1,7 +1,7 @@
 # Supabase Setup
 
 1. In Supabase Auth, enable `Email` + `Password`.
-2. Disable email confirmation so brand-new accounts enter the game immediately after signup.
+2. Disable email confirmation so the game can create a private guest session automatically. Players never see a sign-up or sign-in screen.
 3. Run the SQL in [`supabase/schema.sql`](/Users/benmock/Downloads/TBPNSim/supabase/schema.sql) in the Supabase SQL editor. If multiplayer says `Realtime unavailable`, rerun the latest schema so the `realtime.messages` policies are present.
 4. Keep the `anon` key in the client only. Never put the `service_role` key in browser code.
 5. Because the service-role key was exposed here, rotate it in Supabase before shipping.
@@ -18,4 +18,4 @@
    it checks for a new live stream around the expected start window, keeps checking while live, and falls back to replaying the most recent completed VOD the rest of the day.
 13. When a stream ends, the projector keeps replaying the previously known VOD until YouTube finishes processing the newest archive. Once the archived video appears, the edge function promotes it automatically.
 
-The game now uses Supabase Auth sessions in the browser, stores subscriber totals in `public.profiles`, stores suggestions in `public.suggestions`, persists room chat in `public.chat_messages`, and shares live player positions through Realtime. Players join the default `main` room automatically, or can share a `?room=<name>` URL to meet in a private room with its own live chat feed.
+The game automatically creates and restores a private Supabase Auth guest session in the browser, stores subscriber totals in `public.profiles`, stores suggestions in `public.suggestions`, persists room chat in `public.chat_messages`, and shares live player positions through Realtime. Players join the default `main` room automatically, or can share a `?room=<name>` URL to meet in a private room with its own live chat feed. If Supabase is unavailable, the game starts immediately in local guest mode and keeps subscriber progress in the browser.
